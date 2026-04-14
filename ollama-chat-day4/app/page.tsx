@@ -104,6 +104,8 @@ export default function HomePage() {
         }),
       });
 
+      console.log(res, 'res');
+
       // 4xx/5xx：服务端返回 JSON { error }，不走流，直接展示错误并给 assistant 一条固定文案
       if (!res.ok) {
         const data = (await res.json()) as { error?: string };
