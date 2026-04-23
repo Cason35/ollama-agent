@@ -25,6 +25,8 @@ const cityMap: Record<string, { lat: number; lon: number }> = {
 const MAX_CONTEXT_MESSAGES = 10;
 /** 识别用户自我介绍类句子，用于上下文裁剪时始终保留「名字」记忆 */
 const NAME_PATTERN = /(我叫|我的名字是|叫我)\s*([A-Za-z\u4e00-\u9fa5]+)/;
+const OLLAMA_API_URL = "http://localhost:11434/api/chat";
+const OLLAMA_MODEL = "qwen2.5:14b";
 
 /** 约束模型只输出 JSON，便于路由层解析 action / keyword */
 const systemPrompt = `
@@ -33,6 +35,7 @@ const systemPrompt = `
 任务：
 1) 若用户在查询天气、实时信息、搜索内容，action 必须为 "search"
 2) 普通闲聊，action 为 "chat"
+3) 当 action="chat" 时，content 必须是给用户的直接回复，不能为空
 3) 当 action="search" 时，keyword 必须简短稳定：
    - 查询天气时，只保留城市名，例如："北京"
    - 不要包含 "帮我查"、"天气情况"、标点或完整句子
@@ -81,7 +84,7 @@ function normalizeParsedOutput(input: unknown, rawText: string): ParsedOutput {
   const content =
     typeof candidate.content === "string" && candidate.content.trim().length > 0
       ? candidate.content.trim()
-      : rawText;
+      : "";
   const keyword =
     typeof candidate.keyword === "string" ? candidate.keyword.trim() : "";
 
@@ -93,6 +96,36 @@ function normalizeParsedOutput(input: unknown, rawText: string): ParsedOutput {
 }
 
 /** 解析模型输出：整段 JSON 或从文本中提取 {...} 再解析；失败则当作普通回复 */
+async function generateFallbackChat(messages: ChatMessage[]): Promise<string> {
+  const fallbackSystemPrompt =
+    "你是一个简洁、友好的中文助手。请直接回答用户，不要输出 JSON。";
+
+  const fallbackRes = await fetch(OLLAMA_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      messages: [{ role: "system", content: fallbackSystemPrompt }, ...messages],
+      stream: false,
+    }),
+  });
+
+  if (!fallbackRes.ok) {
+    return "抱歉，我现在暂时无法正常回答，请稍后再试。";
+  }
+
+  const fallbackData = (await fallbackRes.json()) as {
+    message?: { content?: string };
+  };
+
+  return (
+    fallbackData.message?.content?.trim() ||
+    "抱歉，我现在暂时无法正常回答，请稍后再试。"
+  );
+}
+
 function parseModelOutput(modelOutput: string): ParsedOutput {
   try {
     const parsed = JSON.parse(modelOutput);
@@ -188,18 +221,19 @@ export async function POST(req: Request) {
     const trimmedMessages = trimMessages(messages);
 
     // 本地 Ollama：由模型根据 systemPrompt 输出 JSON，决定 chat / search
-    const res = await fetch("http://localhost:11434/api/chat", {
+    const res = await fetch(OLLAMA_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "qwen2.5:14b",
+        model: OLLAMA_MODEL,
         messages: [{ role: "system", content: systemPrompt }, ...trimmedMessages],
         stream: false,
       }),
     });
 
+    console.log("模型返回信息原:", res);
     const rawModelResponse = await res.clone().text();
     console.log("模型返回信息:", rawModelResponse);
     console.log("上下文条数:", trimmedMessages.length);
@@ -236,9 +270,14 @@ export async function POST(req: Request) {
     }
 
     // 普通闲聊：直接返回模型解析后的 content
+    const chatContent =
+      parsed.content.trim().length > 0
+        ? parsed.content
+        : await generateFallbackChat(trimmedMessages);
+
     return Response.json({
       type: "chat",
-      content: parsed.content,
+      content: chatContent,
     });
   } catch (error) {
     console.error("API error:", error);
