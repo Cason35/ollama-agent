@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Day8 聊天页：发送消息到 /api/chat，展示助手回复；
+ * 与后端共用「最近 N 条 + 保留自我介绍」的上下文裁剪逻辑。
+ */
+
 import { FormEvent, useEffect, useRef, useState } from "react";
 
 type ChatMessage = {
@@ -7,6 +12,7 @@ type ChatMessage = {
   content: string;
 };
 
+/** 与 route.ts 返回结构一致：闲聊文本 或 搜索（关键词 + 天气结果） */
 type ChatApiResult =
   | {
       type: "chat";
@@ -18,6 +24,7 @@ type ChatApiResult =
       result: string;
     };
 
+/** 与 API 侧 MAX_CONTEXT_MESSAGES 一致，保证前后裁剪行为对齐 */
 const MAX_CONTEXT_MESSAGES = 10;
 const NAME_PATTERN = /(我叫|我的名字是|叫我)\s*([A-Za-z\u4e00-\u9fa5]+)/;
 
@@ -25,6 +32,7 @@ function isKeyUserMemory(text: string): boolean {
   return NAME_PATTERN.test(text);
 }
 
+/** 构造发往 /api/chat 的 messages（逻辑同服务端 trimMessages） */
 function buildRequestMessages(messages: ChatMessage[]): ChatMessage[] {
   const recentMessages = messages.slice(-MAX_CONTEXT_MESSAGES);
   const keyUserMessage = messages.find(
@@ -44,6 +52,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  /** 合并同一帧内多次 setMessages，减少渲染抖动 */
   const pendingMessagesRef = useRef<ChatMessage[] | null>(null);
   const rafIdRef = useRef<number | null>(null);
 
@@ -55,6 +64,7 @@ export default function HomePage() {
     };
   }, []);
 
+  // 新消息或 loading 结束时滚动到底部
   useEffect(() => {
     listRef.current?.scrollTo({
       top: listRef.current.scrollHeight,
@@ -62,6 +72,7 @@ export default function HomePage() {
     });
   }, [messages, loading]);
 
+  /** 用 requestAnimationFrame 批量提交 messages 更新 */
   function scheduleMessagesCommit(nextMessages: ChatMessage[]) {
     pendingMessagesRef.current = nextMessages;
 
@@ -76,6 +87,7 @@ export default function HomePage() {
     });
   }
 
+  /** 追加用户消息 → 请求 API → 追加助手消息（或错误提示） */
   async function handleSend() {
     const userInput = input.trim();
     if (!userInput || loading) return;
@@ -92,6 +104,7 @@ export default function HomePage() {
     setLoading(true);
 
     try {
+      // 只发送裁剪后的上下文，与后端策略一致
       const requestMessages = buildRequestMessages(withUser);
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -110,6 +123,7 @@ export default function HomePage() {
       }
 
       const data = (await res.json()) as ChatApiResult;
+      // 搜索分支：展示关键词 + 天气结果
       if (data.type === "search") {
         scheduleMessagesCommit([
           ...withUser,
@@ -119,6 +133,7 @@ export default function HomePage() {
           },
         ]);
       } else {
+        // 闲聊分支：直接展示模型回复
         scheduleMessagesCommit([
           ...withUser,
           { role: "assistant", content: data.content },

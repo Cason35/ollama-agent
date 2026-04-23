@@ -1,22 +1,32 @@
+/**
+ * 聊天 API：调用本地 Ollama，用结构化 JSON 区分「闲聊」与「搜索（天气）」，
+ * 搜索分支再请求 Open-Meteo 返回真实天气；上下文条数与前端一致做裁剪。
+ */
+
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
 };
 
+/** 模型按 systemPrompt 解析后的意图与展示/检索用字段 */
 type ParsedOutput = {
   action: "chat" | "search";
   content: string;
   keyword: string;
 };
 
+/** 仅支持的城市 → 经纬度（供天气 API 使用） */
 const cityMap: Record<string, { lat: number; lon: number }> = {
   北京: { lat: 39.9042, lon: 116.4074 },
   上海: { lat: 31.2304, lon: 121.4737 },
 };
 
+/** 参与 Ollama 请求的最大消息条数（与前端 buildRequestMessages 对齐） */
 const MAX_CONTEXT_MESSAGES = 10;
+/** 识别用户自我介绍类句子，用于上下文裁剪时始终保留「名字」记忆 */
 const NAME_PATTERN = /(我叫|我的名字是|叫我)\s*([A-Za-z\u4e00-\u9fa5]+)/;
 
+/** 约束模型只输出 JSON，便于路由层解析 action / keyword */
 const systemPrompt = `
 你是一个AI助手，必须严格输出 JSON，不允许输出任何解释或 Markdown。
 
@@ -39,6 +49,10 @@ function isKeyUserMemory(text: string): boolean {
   return NAME_PATTERN.test(text);
 }
 
+/**
+ * 裁剪上下文：只取最近 N 条；若更早的用户消息含「名字」等关键记忆且不在最近 N 条内，
+ * 则把该条 prepend，避免长对话丢身份。
+ */
 function trimMessages(messages: ChatMessage[]): ChatMessage[] {
   const recentMessages = messages.slice(-MAX_CONTEXT_MESSAGES);
   const keyUserMessage = messages.find(
@@ -52,6 +66,7 @@ function trimMessages(messages: ChatMessage[]): ChatMessage[] {
   return [keyUserMessage, ...recentMessages];
 }
 
+/** 将模型 JSON 规范为合法 ParsedOutput，异常时回退为纯闲聊 */
 function normalizeParsedOutput(input: unknown, rawText: string): ParsedOutput {
   if (!input || typeof input !== "object") {
     return {
@@ -77,6 +92,7 @@ function normalizeParsedOutput(input: unknown, rawText: string): ParsedOutput {
   };
 }
 
+/** 解析模型输出：整段 JSON 或从文本中提取 {...} 再解析；失败则当作普通回复 */
 function parseModelOutput(modelOutput: string): ParsedOutput {
   try {
     const parsed = JSON.parse(modelOutput);
@@ -88,7 +104,7 @@ function parseModelOutput(modelOutput: string): ParsedOutput {
         const parsed = JSON.parse(jsonMatch[0]);
         return normalizeParsedOutput(parsed, modelOutput);
       } catch {
-        // ignore and fallback
+        // 提取的片段仍非法则走下方回退
       }
     }
 
@@ -100,6 +116,7 @@ function parseModelOutput(modelOutput: string): ParsedOutput {
   }
 }
 
+/** 从用户/keyword 文案里解析城市名（先匹配已知城市，再清洗口语后缀后匹配） */
 function extractWeatherCity(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return "";
@@ -126,6 +143,7 @@ function extractWeatherCity(text: string): string {
   return cleaned;
 }
 
+/** 调用 Open-Meteo 当前天气，仅 cityMap 内城市有结果 */
 async function realWeather(city: string): Promise<string> {
   const location = cityMap[city];
   if (!location) {
@@ -169,6 +187,7 @@ export async function POST(req: Request) {
 
     const trimmedMessages = trimMessages(messages);
 
+    // 本地 Ollama：由模型根据 systemPrompt 输出 JSON，决定 chat / search
     const res = await fetch("http://localhost:11434/api/chat", {
       method: "POST",
       headers: {
@@ -199,6 +218,7 @@ export async function POST(req: Request) {
     const modelOutput = (data.message?.content || "").trim();
     const parsed = parseModelOutput(modelOutput);
 
+    // search：用 keyword/内容/最近用户句解析城市，拉真实天气后返回 type: search
     if (parsed.action === "search") {
       const latestUserMessage = [...trimmedMessages]
         .reverse()
@@ -215,6 +235,7 @@ export async function POST(req: Request) {
       });
     }
 
+    // 普通闲聊：直接返回模型解析后的 content
     return Response.json({
       type: "chat",
       content: parsed.content,
