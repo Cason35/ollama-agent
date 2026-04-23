@@ -300,12 +300,19 @@ export async function POST(req: Request) {
       );
     }
 
+    console.log("res", res);
+
     const data = (await res.json()) as {
       message?: { content?: string };
     };
     const modelOutput = (data.message?.content || "").trim();
     const parsed = parseModelOutput(modelOutput);
     const latestUser = getLatestUserText(trimmedMessages);
+
+    console.log("data", data);
+    console.log("modelOutput", modelOutput);
+    console.log("parsed", parsed);
+    console.log("latestUser", latestUser);
 
     // 第二步：后端根据 action 调用对应业务工具。
     switch (parsed.action) {
