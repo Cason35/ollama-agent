@@ -21,7 +21,7 @@
 
 通过 `systemPrompt` 强约束模型只输出 JSON（`action/content/keyword`），完成“意图路由”：
 
-1. 第一步：模型判断用户意图并返回结构化结果  
+1. 第一步：模型判断用户意图并返回结构化结果
 2. 第二步：后端按 `action` 分发到业务函数
 
 这让 Agent 从“只会回答”变成“会选择工具并执行”。
@@ -95,17 +95,17 @@
 
 ## 4. 今天最重要的工程收获
 
-1. **Agent 不只是模型回答**：关键在“意图识别 + 工具调用 + 结果编排”  
-2. **结构化输出必须做容错**：模型不稳定时要有解析降级与业务兜底  
-3. **上下文策略要前后端一致**：否则会出现记忆错位和行为不一致  
-4. **体验细节很关键**：乐观更新、滚动、错误回写能显著提升可用性  
+1. **Agent 不只是模型回答**：关键在“意图识别 + 工具调用 + 结果编排”
+2. **结构化输出必须做容错**：模型不稳定时要有解析降级与业务兜底
+3. **上下文策略要前后端一致**：否则会出现记忆错位和行为不一致
+4. **体验细节很关键**：乐观更新、滚动、错误回写能显著提升可用性
 5. **先占位再迭代是有效路径**：summary/todo 先跑通流程，再替换真实能力
 
 ---
 
 ## 5. 下一步可继续优化
 
-- 把 `summarize`、`generateTodos` 从占位实现升级为真实 LLM 调用
+- 把 `summarize`、`generateTodos` 从占位实现升级为真实 *LLM 调用*
 - 扩展天气城市词典或接入地理编码服务，减少手工映射
 - 增加工具调用日志与耗时统计，便于评估稳定性
 - 补充单元测试：解析容错、城市提取、上下文裁剪、路由分发
@@ -152,13 +152,13 @@ type SummaryAction = {
 };
 ```
 
-2. 从 `messages` 提取上下文，不取全量（避免 token 爆炸）
+1. 从 `messages` 提取上下文，不取全量（避免 token 爆炸）
 
 ```ts
 const recentMessages = messages.slice(-6);
 ```
 
-3. 构造 summary prompt
+1. 构造 summary prompt
 
 ```ts
 const prompt = `
@@ -172,8 +172,8 @@ ${recentMessages.map((m) => `${m.role}: ${m.content}`).join("\n")}
 `;
 ```
 
-4. 调用模型（使用当前 Ollama `/api/chat`）
-5. 返回结构化结果
+1. 调用模型（使用当前 Ollama `/api/chat`）
+2. 返回结构化结果
 
 ```ts
 return {
@@ -218,7 +218,7 @@ type TodoItem = {
 };
 ```
 
-2. 使用强约束 prompt（关键）
+1. 使用强约束 prompt（关键）
 
 ```ts
 const prompt = `
@@ -235,7 +235,7 @@ ${userInput}
 `;
 ```
 
-3. 解析 JSON 并添加 fallback
+1. 解析 JSON 并添加 fallback
 
 ```ts
 try {
@@ -267,7 +267,7 @@ console.log("[Agent] action:", action);
 console.log("[Agent] input:", input);
 ```
 
-2. 统计耗时
+1. 统计耗时
 
 ```ts
 const start = Date.now();
@@ -276,7 +276,7 @@ const duration = Date.now() - start;
 console.log("[Agent] duration:", duration, "ms");
 ```
 
-3. 错误日志
+1. 错误日志
 
 ```ts
 try {
@@ -337,3 +337,4 @@ try {
 9. 当前系统能力：
 10. 明天准备优化：
 ```
+
