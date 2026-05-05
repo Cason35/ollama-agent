@@ -1,65 +1,45 @@
 "use client";
 
-/**
- * Day 11 聊天前端：与 `/api/chat` 交互，展示用户气泡与多种助手卡片（普通文本 / 天气 / 总结 / 待办）。
- *
- * 状态策略：
- * - `bubbles` 是唯一渲染数据源；助手侧用 discriminated union（variant）区分 UI；
- * - `memory` 每轮用响应整体覆盖，与后端压缩策略保持一致；
- * - `scheduleBubblesCommit` 用 requestAnimationFrame 合并同一帧内的多次气泡更新，减轻抖动。
- *
- * 数据流：用户在输入框发送 → 将历史气泡降级为 `ChatMessage[]` 并附上本轮输入 → POST → 根据 `type` 转成助手气泡并追加。
- */
-
 import { FormEvent, useEffect, useRef, useState } from "react";
 
-// 与后端接口约定的基础消息结构。
-// 注意：这里是「传输层消息」，不包含天气卡片 / Todo 卡片等富展示字段。
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
 };
 
-// Todo 业务卡片的数据结构。
-// done 目前仅展示状态，前端未提供交互更新逻辑（只读勾选框）。
+type MemoryImportance = "high" | "low";
+
+type MemoryItem = {
+  content: string;
+  importance: MemoryImportance;
+};
+
+type Memory = {
+  shortTerm: ChatMessage[];
+  items: MemoryItem[];
+};
+
 type TodoItem = {
   task: string;
   done: boolean;
 };
 
-// 前端维护的记忆信息（与 Day11 后端约定：longTerm 为聚合后的长字符串）。
-// - shortTerm：最近若干条对话快照，便于在侧栏观察上下文窗口；
-// - longTerm：跨轮次沉淀的事实文本，用于下一请求带回服务端。
-type Memory = {
-  shortTerm: ChatMessage[];
-  longTerm: string;
-};
-
-// /api/chat 的联合返回类型，前端通过 type 做分发渲染。
-// 设计成可判别联合（discriminated union），可在 TS 层获得完整分支类型收窄。
 type ChatApiResult =
   | { type: "chat"; content: string; memory: Memory }
   | { type: "weather"; keyword: string; result: string; memory: Memory }
   | { type: "summary"; text: string; memory: Memory }
   | { type: "todo"; items: TodoItem[]; memory: Memory };
 
-/** 用户侧气泡：仅纯文本。 */
 type UserBubble = { role: "user"; content: string };
 
-/** 助手侧气泡：用 variant 区分四种渲染分支（与普通字符串分开，便于 TS 收窄）。 */
 type AssistantBubble =
   | { role: "assistant"; variant: "chat"; content: string }
   | { role: "assistant"; variant: "weather"; keyword: string; result: string }
   | { role: "assistant"; variant: "summary"; text: string }
   | { role: "assistant"; variant: "todo"; items: TodoItem[] };
 
-/** 列表渲染用的联合：先按 role 分出用户 / 助手，再按 variant 细分手助手卡片类型。 */
 type Bubble = UserBubble | AssistantBubble;
 
-/**
- * 将 `/api/chat` 的联合响应映射为助手气泡（AssistantBubble）。
- * 隔离点：后续若后端字段改名或增加类型，只需改此处与 fetch 处的类型断言。
- */
 function apiToAssistant(data: ChatApiResult): AssistantBubble {
   if (data.type === "chat") {
     return { role: "assistant", variant: "chat", content: data.content };
@@ -78,32 +58,17 @@ function apiToAssistant(data: ChatApiResult): AssistantBubble {
   return { role: "assistant", variant: "todo", items: data.items };
 }
 
-/** 页面根组件：左侧对话 + 右侧 Memory 调试侧栏（-lg 以下单列堆叠）。 */
 export default function HomePage() {
-  // 输入框内容（受控组件）。
   const [input, setInput] = useState("");
-  // 聊天区渲染源（用户 + 助手所有气泡）。
-  // 所有 UI 展示都由它驱动，属于页面最核心状态。
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
-  // 请求中状态，控制按钮/输入可用性与文案。
-  // 避免并发提交导致消息顺序错乱。
   const [loading, setLoading] = useState(false);
-  // 统一错误提示文案（顶部短提示）。
   const [errorText, setErrorText] = useState("");
-  // 与后端同步的记忆对象。
-  // 每次响应后整体覆盖，确保本地状态与后端最新记忆一致。
-  const [memory, setMemory] = useState<Memory>({ shortTerm: [], longTerm: "" });
-  // 聊天列表容器引用，用于滚动到底部。
+  const [memory, setMemory] = useState<Memory>({ shortTerm: [], items: [] });
   const listRef = useRef<HTMLDivElement>(null);
-  // 下一帧准备提交的 bubbles 快照。
-  // 通过 ref 暂存，避免同一帧内多次 setState 造成无意义重渲染。
   const pendingBubblesRef = useRef<Bubble[] | null>(null);
-  // requestAnimationFrame 任务 id，用于去重调度与卸载清理。
   const rafIdRef = useRef<number | null>(null);
 
   useEffect(() => {
-    // 组件卸载时清理 raf，避免无效 setState。
-    // 防止页面切换后仍尝试提交 bubbles，触发 React 警告。
     return () => {
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current);
@@ -112,16 +77,12 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    // 每次消息变化后自动滚动到最底部，保证最新消息可见。
-    // loading 也纳入依赖，确保“发送后等待中”状态下滚动逻辑同样触发。
     listRef.current?.scrollTo({
       top: listRef.current.scrollHeight,
       behavior: "smooth",
     });
   }, [bubbles, loading]);
 
-  // 在同一帧内合并多次 bubbles 更新，减少重渲染抖动。
-  // 这是一个微型批处理器：同一帧只真正 setState 一次。
   function scheduleBubblesCommit(next: Bubble[]) {
     pendingBubblesRef.current = next;
     if (rafIdRef.current !== null) return;
@@ -136,18 +97,10 @@ export default function HomePage() {
 
   async function handleSend() {
     const userInput = input.trim();
-    // 输入为空或仍在处理中时，不触发请求。
-    // 双重防抖：交互层阻断无效请求 + 状态层阻断并发请求。
     if (!userInput || loading) return;
 
     setErrorText("");
 
-    /*
-     * 将气泡列表扁化为 ChatMessage[]：
-     * - 天气卡：合成「关键词 + 结果」一行摘要；
-     * - 总结卡：用全文 text；
-     * - 待办卡：只用每条 task 文本拼接（勾选状态不传——后端若需要可自行扩展协议）。
-     */
     const forRequest: ChatMessage[] = bubbles.map((b) =>
       b.role === "user"
         ? b
@@ -164,8 +117,6 @@ export default function HomePage() {
     );
 
     const withUser: ChatMessage[] = [...forRequest, { role: "user", content: userInput }];
-    // 乐观更新：先把用户气泡写入 pending/next，请求返回后再追加助手气泡。
-    // 失败时也在同一列表末尾追加错误提示，保证时间顺序与用户感知一致。
     const nextBubbles: Bubble[] = [...bubbles, { role: "user", content: userInput }];
 
     scheduleBubblesCommit(nextBubbles);
@@ -173,8 +124,6 @@ export default function HomePage() {
     setLoading(true);
 
     try {
-      // 发送完整上下文（messages + memory）给后端进行路由与执行。
-      // messages 提供会话文本，memory 提供压缩记忆，两者结合提升多轮稳定性。
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -182,8 +131,6 @@ export default function HomePage() {
       });
 
       if (!res.ok) {
-        // 后端返回失败时，将错误同时展示在顶部和对话区。
-        // 顶部用于快速感知；对话区保留上下文，便于回看问题发生点。
         const data = (await res.json()) as { error?: string };
         const content = data.error || "请求失败，请稍后重试";
         setErrorText(content);
@@ -194,14 +141,10 @@ export default function HomePage() {
         return;
       }
 
-      // 正常返回后，用后端返回的最新 memory 覆盖本地状态。
-      // 注意这里不做 merge，直接替换能避免前后端记忆分叉。
       const data = (await res.json()) as ChatApiResult;
       setMemory(data.memory);
       scheduleBubblesCommit([...nextBubbles, apiToAssistant(data)]);
     } catch (error) {
-      // 网络异常通常是 Ollama 未启动或本地网络不可达。
-      // 这里给出固定文案，避免把底层异常对象直接暴露给用户。
       console.error(error);
       setErrorText("网络异常，请检查 Ollama 与网络连接");
       scheduleBubblesCommit([
@@ -209,29 +152,24 @@ export default function HomePage() {
         { role: "assistant", variant: "chat", content: "Network error" },
       ]);
     } finally {
-      // 请求结束后恢复输入能力。
-      // 无论成功/失败都执行，避免按钮卡死在 loading。
       setLoading(false);
     }
   }
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    // 阻止表单默认刷新，改为前端异步提交。
-    // 统一入口到 handleSend，保证点击按钮与回车提交逻辑一致。
     e.preventDefault();
     handleSend();
   }
 
   return (
     <main className="mx-auto min-h-screen max-w-5xl p-8">
-      <h1 className="mb-6 text-2xl font-bold">Day 11 - Memory 升级 Agent</h1>
+      <h1 className="mb-6 text-2xl font-bold">Day 12 - Memory 参与决策链</h1>
       <p className="mb-4 text-sm text-zinc-600">
-        试试先说身份目标，再多轮聊天：例如「我是前端工程师，目标是转型 Agent」
+        先说身份与目标，再试「继续刚才的待办」「按计划拆解任务」；观察右侧记忆权重与长度控制。
       </p>
 
-      {/* 大屏：主栏约占 2/3，侧栏 1/3；小屏垂直排列 */}
       <div className="grid gap-4 lg:grid-cols-[2fr,1fr]">
-        <section aria-label="对话区">
+        <section>
           <form onSubmit={handleSubmit} className="mb-3 flex gap-2">
             <input
               className="flex-1 rounded border border-zinc-300 bg-white px-3 py-2 text-black dark:border-zinc-600 dark:bg-zinc-900 dark:text-white"
@@ -256,8 +194,6 @@ export default function HomePage() {
             ref={listRef}
             className="max-h-[65vh] min-h-[220px] space-y-3 overflow-y-auto rounded border border-zinc-200 p-4 dark:border-zinc-700"
           >
-            {/* 按消息类型渲染不同业务卡片（普通聊天/天气/总结/Todo） */}
-            {/* 这里的分支顺序与 Bubble 联合类型保持一致，便于维护时一一对应。 */}
             {bubbles.length === 0 ? (
               <p className="text-zinc-500">聊天记录会显示在这里</p>
             ) : (
@@ -321,8 +257,6 @@ export default function HomePage() {
                     key={`todo-${index}`}
                     className="mr-8 rounded-lg border border-emerald-200 bg-emerald-50/90 px-3 py-2 dark:border-emerald-800 dark:bg-emerald-950/40"
                   >
-                    {/* Todo 仅用于展示，勾选框当前为只读。 */}
-                    {/* 若后续要支持勾选同步，可在此处增加 onChange 并回传后端。 */}
                     <p className="mb-2 text-xs font-medium text-emerald-900 dark:text-emerald-200">
                       待办计划
                     </p>
@@ -341,18 +275,32 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* 调试用途：展示服务端回传的 shortTerm 条数与 longTerm 全文 */}
-        <aside
-          className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700"
-          aria-label="Memory 调试"
-        >
+        <aside className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
           <h3 className="mb-2 text-sm font-semibold">🧠 Memory Debug</h3>
-          {/* shortTerm 条数可快速观察上下文窗口是否被裁剪。 */}
-          {/* 该区域主要用于调试记忆策略，生产环境可按需隐藏。 */}
-          <p className="mb-2 text-xs text-zinc-500">shortTerm: {memory.shortTerm.length} 条</p>
-          <pre className="max-h-[55vh] overflow-auto whitespace-pre-wrap rounded bg-zinc-100 p-3 text-xs text-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
-            {memory.longTerm || "(暂无 longTerm 记忆)"}
-          </pre>
+          <p className="mb-2 text-xs text-zinc-500">
+            shortTerm: {memory.shortTerm.length} 条 · items: {memory.items.length} 条
+          </p>
+          <ul className="max-h-[55vh] space-y-2 overflow-auto rounded bg-zinc-100 p-3 text-xs text-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
+            {memory.items.length === 0 ? (
+              <li>(暂无长期记忆条目)</li>
+            ) : (
+              memory.items.map((item, i) => (
+                <li
+                  key={`${item.content}-${i}`}
+                  className={
+                    item.importance === "high"
+                      ? "border-l-2 border-amber-500 pl-2"
+                      : "border-l-2 border-zinc-300 pl-2 dark:border-zinc-600"
+                  }
+                >
+                  <span className="mr-2 font-mono text-[10px] uppercase text-zinc-500">
+                    {item.importance}
+                  </span>
+                  {item.content}
+                </li>
+              ))
+            )}
+          </ul>
         </aside>
       </div>
     </main>

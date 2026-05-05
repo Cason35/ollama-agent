@@ -1,0 +1,792 @@
+/**
+ * Next.js App Router：`POST /api/chat` —— 带记忆与工具路由的聊天接口。
+ *
+ * 整体流程：
+ * 1. 解析请求中的 messages 与可选 memory，调用 buildMemory 组装「短期窗口 + 长期条目」并生成喂给模型的 messages；
+ * 2. 用专用 system 提示词走一轮 Ollama，让模型输出 JSON 形式的 action（路由）；
+ * 3. 结合「延续上一轮」等启发规则修正 action，再分支执行：天气 / 总结 / 待办 / 普通回复；
+ * 4. 响应体始终带上最新的 memory，供前端下一轮原样回传，形成闭环。
+ *
+ * 外部依赖：本地 Ollama HTTP API；天气分支使用 Open-Meteo（无需 key）。
+ */
+
+/** 与前端约定的单条对话消息（仅 user / assistant 文本）。 */
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+/** 长期记忆条目的重要程度：路由与压缩时优先保留 high。 */
+type MemoryImportance = "high" | "low";
+
+/** 单条长期记忆：内容 + 重要性，替代早期单一的 longTerm 长字符串。 */
+type MemoryItem = {
+  content: string;
+  importance: MemoryImportance;
+};
+
+/**
+ * 服务端持有的完整记忆结构。
+ * - shortTerm：保留最近若干轮，供路由与最终回复感知当下语境；
+ * - items：带权重的长期事实列表（可由模型总结或规则抽取得到）。
+ */
+type Memory = {
+  shortTerm: ChatMessage[];
+  items: MemoryItem[];
+};
+
+/** 路由模型输出中的意图枚举（与前端展示类型一一对应）。 */
+type Action = "chat" | "weather" | "summary" | "todo";
+
+/** 路由模型应输出的 JSON 形状（经 parseModelOutput 规范化）。 */
+type ParsedOutput = {
+  action: Action;
+  /** 部分场景下作为工具输入的摘要文本（如聊天兜底）。 */
+  content: string;
+  /** 天气意图下的城市/地区关键词。 */
+  keyword: string;
+};
+
+/** 待办卡片中单条任务。 */
+type TodoItem = {
+  task: string;
+  done: boolean;
+};
+
+/** 返回给前端的联合类型（含 memory）。 */
+type ChatResponseBody =
+  | { type: "chat"; content: string; memory: Memory }
+  | { type: "weather"; keyword: string; result: string; memory: Memory }
+  | { type: "summary"; text: string; memory: Memory }
+  | { type: "todo"; items: TodoItem[]; memory: Memory };
+
+/**
+ * 不含 memory 的响应负载。
+ * 单独拆出用于 withMemory 组装最终体，避免 TS 对 Omit<联合类型> 的收窄问题。
+ */
+type ChatResponsePayload =
+  | { type: "chat"; content: string }
+  | { type: "weather"; keyword: string; result: string }
+  | { type: "summary"; text: string }
+  | { type: "todo"; items: TodoItem[] };
+
+/**
+ * 请求体中的 memory 字段：兼容 Day11 的 longTerm 字符串，也支持新结构的 items。
+ */
+type IncomingMemoryPayload = Partial<Memory> & { longTerm?: string };
+
+// ---------- 上下文与记忆体积限制 ----------
+
+/** 当 incoming messages 超过该条数时，较早部分会先被总结进长期记忆再丢弃出窗口。 */
+const MAX_CONTEXT_MESSAGES = 10;
+/** 短期窗口保留的最近消息条数（与 MAX_CONTEXT_MESSAGES 配合控制总量）。 */
+const SHORT_TERM_SIZE = 6;
+/** 长期记忆条目序列化后的字符上限，超出时按重要性裁剪。 */
+const MAX_LONG_TERM_CHARS = 2000;
+/** 总字符数或条数超阈时触发二次「模型压缩」长期记忆。 */
+const SECONDARY_COMPRESS_THRESHOLD_CHARS = 500;
+/** 二次压缩后最多保留的条目数。 */
+const MAX_COMPRESSED_ITEMS = 5;
+
+// ---------- Ollama ----------
+
+const OLLAMA_API_URL = "http://localhost:11434/api/chat";
+const OLLAMA_MODEL = "qwen2.5:14b";
+
+// ---------- 规则抽取 / 重要性推断用的正则 ----------
+
+/** 匹配用户话术中「值得写入长期记忆」的自我介绍、目标等句式。 */
+const LONG_TERM_RULE_PATTERN = /(我叫|我的名字是|叫我|我是|我想|我的目标|我希望|偏好|习惯)/;
+/** 用于推断 importance=high 的关键词（身份、规划类）。 */
+const HIGH_IMPORTANCE_PATTERN =
+  /(我叫|我的名字|我是|我想|我的目标|我希望|长期|计划|转型|职业|岗位)/;
+/** 闲聊语气词：倾向于标为 low 或在压缩时丢弃。 */
+const LOW_CHITCHAT_PATTERN = /(哈哈|呵呵|谢谢|好的|嗯嗯|随便聊聊|今天天气不错)/;
+
+/** 演示用城市 → 经纬度，供 Open-Meteo 查询；未列入的城市会提示不支持。 */
+const cityMap: Record<string, { lat: number; lon: number }> = {
+  北京: { lat: 39.9042, lon: 116.4074 },
+  上海: { lat: 31.2304, lon: 121.4737 },
+};
+
+/** 结构化日志，便于在服务端排查路由与耗时。 */
+function logAgent(event: string, payload: Record<string, unknown>) {
+  console.log(`[Agent] ${event}`, payload);
+}
+
+/** 调用本地 Ollama /api/chat，非流式，返回完整 message.content。 */
+async function callOllama(messages: Array<{ role: string; content: string }>) {
+  return fetch(OLLAMA_API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      messages,
+      stream: false,
+    }),
+  });
+}
+
+/** 将模型输出的 action 字符串收敛到本服务支持的四种之一（含 search→weather 别名）。 */
+function normalizeAction(raw: unknown): Action {
+  if (raw === "weather" || raw === "search") return "weather";
+  if (raw === "summary") return "summary";
+  if (raw === "todo") return "todo";
+  return "chat";
+}
+
+/**
+ * 将任意 JSON 对象规范为 ParsedOutput；字段缺失或类型不对时使用安全默认值。
+ * rawText 用于在完全无法解析时把原始文本塞进 content（便于走 chat 兜底）。
+ */
+function normalizeParsedOutput(input: unknown, rawText: string): ParsedOutput {
+  if (!input || typeof input !== "object") {
+    return { action: "chat", content: rawText, keyword: "" };
+  }
+  const candidate = input as Partial<ParsedOutput>;
+  return {
+    action: normalizeAction(candidate.action),
+    content:
+      typeof candidate.content === "string" && candidate.content.trim()
+        ? candidate.content.trim()
+        : "",
+    keyword: typeof candidate.keyword === "string" ? candidate.keyword.trim() : "",
+  };
+}
+
+/**
+ * 解析路由模型的文本输出：优先整段 JSON.parse；失败则尝试提取首个 {...} 子串再解析；
+ * 仍失败则视为普通文本，action 固定为 chat。
+ */
+function parseModelOutput(modelOutput: string): ParsedOutput {
+  try {
+    return normalizeParsedOutput(JSON.parse(modelOutput), modelOutput);
+  } catch {
+    const jsonMatch = modelOutput.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        return normalizeParsedOutput(JSON.parse(jsonMatch[0]), modelOutput);
+      } catch {
+        // ignore
+      }
+    }
+    return { action: "chat", content: modelOutput, keyword: "" };
+  }
+}
+
+/** 去掉 Markdown 列表前缀「- 」并 trim，便于把多行字符串拆成记忆条目。 */
+function normalizeContentLine(line: string): string {
+  return line.replace(/^\s*-\s*/, "").trim();
+}
+
+/** 无结构化 importance 时，用启发式正则猜测 high / low。 */
+function inferImportanceFromText(text: string): MemoryImportance {
+  const t = text.trim();
+  if (HIGH_IMPORTANCE_PATTERN.test(t)) return "high";
+  if (LOW_CHITCHAT_PATTERN.test(t)) return "low";
+  return "low";
+}
+
+/** 将旧版「单字符串 longTerm」按行拆成多条干净文本。 */
+function splitMemoryLines(longTerm: string): string[] {
+  return longTerm
+    .split("\n")
+    .map((line) => normalizeContentLine(line))
+    .filter(Boolean);
+}
+
+/** 估算当前长期条目占用的总字符数（用于判断是否触发压缩）。 */
+function memoryItemsCharLength(items: MemoryItem[]): number {
+  return items.reduce((sum, i) => sum + i.content.length, 0);
+}
+
+/**
+ * 在不超过 MAX_LONG_TERM_CHARS 的前提下尽量保留更多条目：
+ * 先保留全部 high，再按顺序尝试加入 low；仍超长则粗暴截取末尾若干条。
+ */
+function trimMemoryItems(items: MemoryItem[]): MemoryItem[] {
+  let joined = items.map((i) => `- ${i.content}`).join("\n");
+  if (joined.length <= MAX_LONG_TERM_CHARS) return items;
+  const high = items.filter((i) => i.importance === "high");
+  const low = items.filter((i) => i.importance === "low");
+  let kept = [...high];
+  for (const item of low) {
+    const trial = [...kept, item];
+    const s = trial.map((i) => `- ${i.content}`).join("\n");
+    if (s.length <= MAX_LONG_TERM_CHARS) kept = trial;
+    else break;
+  }
+  joined = kept.map((i) => `- ${i.content}`).join("\n");
+  if (joined.length <= MAX_LONG_TERM_CHARS) return kept;
+  return kept.slice(-Math.ceil(MAX_LONG_TERM_CHARS / 40));
+}
+
+/**
+ * 按内容（忽略大小写）去重；若同一内容既有 low 又有 high，保留 high。
+ */
+function dedupeMemoryItems(items: MemoryItem[]): MemoryItem[] {
+  const map = new Map<string, MemoryItem>();
+  for (const item of items) {
+    const key = item.content.trim().toLowerCase();
+    const prev = map.get(key);
+    if (!prev || (prev.importance === "low" && item.importance === "high")) {
+      map.set(key, item);
+    }
+  }
+  return Array.from(map.values());
+}
+
+/** 合并新旧长期条目后去重并按体积裁剪。 */
+function appendMemoryItems(base: MemoryItem[], additions: MemoryItem[]): MemoryItem[] {
+  return trimMemoryItems(dedupeMemoryItems([...base, ...additions]));
+}
+
+/**
+ * 统一入口：优先读请求里的 items 数组；否则把 longTerm 字符串拆行并推断每条 importance。
+ */
+function normalizeIncomingMemoryPayload(payload?: IncomingMemoryPayload): MemoryItem[] {
+  if (payload?.items && Array.isArray(payload.items)) {
+    return payload.items
+      .filter((i) => i && typeof i.content === "string" && i.content.trim())
+      .map((i) => ({
+        content: i.content.trim(),
+        importance: i.importance === "high" ? "high" : "low",
+      }));
+  }
+  if (payload?.longTerm && typeof payload.longTerm === "string") {
+    return splitMemoryLines(payload.longTerm).map((line) => ({
+      content: line,
+      importance: inferImportanceFromText(line),
+    }));
+  }
+  return [];
+}
+
+/**
+ * 将多条 MemoryItem 格式化为「- 内容」拼接块；可指定只输出某一 importance。
+ */
+function formatMemoryBlock(items: MemoryItem[], importance?: MemoryImportance): string {
+  const filtered =
+    importance !== undefined ? items.filter((i) => i.importance === importance) : items;
+  if (filtered.length === 0) return "";
+  return filtered.map((i) => `- ${i.content}`).join("\n");
+}
+
+/**
+ * 构造「只做路由、不直接闲聊」的 system 提示词：要求模型仅输出一行 JSON。
+ * 其中注入高/低优先级记忆块，便于识别省略语与「继续上次」类指令。
+ */
+function buildRoutingSystemPrompt(memory: Memory): string {
+  const highBlock = formatMemoryBlock(memory.items, "high");
+  const lowBlock = formatMemoryBlock(memory.items, "low");
+  return `
+你是一个路由助手，必须严格输出 JSON，不允许输出解释或 Markdown。
+你必须结合「用户最新一轮输入」与下列「长期记忆」判断意图；省略语（如继续刚才的任务）必须依赖记忆补全语义。
+
+【高优先级记忆】（身份/目标/偏好，路由时优先参考）
+${highBlock || "(空)"}
+
+【其他记忆】
+${lowBlock || "(空)"}
+
+任务（按意图选择 action）：
+1) 用户问天气、气温、某城市天气 -> "weather"
+2) 用户要总结、概括、归纳 -> "summary"
+3) 用户要做计划、列待办、任务清单、或表达「继续刚才的待办/按上次计划」且记忆中存在目标/任务语境 -> "todo"
+4) 普通闲聊 -> "chat"
+
+特殊规则：
+- 若用户说「继续/刚才/上次/那个任务/按计划/接着」且需要延续计划或任务拆解 -> 优先 "todo"
+- 若用户明确要延续上文归纳、要点汇总 -> 优先 "summary"
+- keyword：weather 时填城市或地区关键词；其它可为空
+
+输出格式（仅一行 JSON）：
+{"action":"chat|weather|summary|todo","content":"","keyword":""}
+`.trim();
+}
+
+/** 判断用户是否在用语境衔接词，需要结合记忆猜测真实意图。 */
+const CONTINUATION_PATTERN = /继续|刚才|刚刚|上次|那个任务|按计划|接着|再来|跟上文|刚才那个/;
+
+function isContinuationQuery(text: string): boolean {
+  return CONTINUATION_PATTERN.test(text);
+}
+
+/**
+ * 当路由模型仍返回 chat，但用户话术像「继续」且记忆中存在总结/待办语境时，
+ * 强制升级为 summary 或 todo，减少误路由为闲聊。
+ */
+function resolveContinuationAction(latestUser: string, parsed: ParsedOutput, memory: Memory): Action {
+  if (parsed.action !== "chat") return parsed.action;
+  if (!isContinuationQuery(latestUser)) return parsed.action;
+
+  const memAll = memory.items.map((i) => i.content).join("\n");
+  const high = formatMemoryBlock(memory.items, "high");
+
+  if (/总结|归纳|要点|摘要|上文/.test(latestUser)) return "summary";
+  if (/待办|任务清单|清单|计划|todo/i.test(latestUser)) return "todo";
+
+  if (/总结|归纳|要点/.test(memAll) && !/待办|任务|清单/.test(memAll)) return "summary";
+  if (/待办|任务|清单|计划|目标/.test(high) || /待办|任务/.test(memAll)) return "todo";
+
+  return "todo";
+}
+
+/**
+ * 长期记忆过多时，用单独一轮模型调用把多条事实压缩成少量核心条目（仍带 importance）。
+ * 请求失败则退化为去重 + trim 后截断。
+ */
+async function secondaryCompressItems(items: MemoryItem[]): Promise<MemoryItem[]> {
+  if (items.length === 0) return items;
+  const existingHigh = formatMemoryBlock(items, "high");
+  const prompt = `
+你是记忆压缩器。将下列记忆合并压缩为最多 ${MAX_COMPRESSED_ITEMS} 条核心事实。
+要求：
+1. 仅保留身份/目标/偏好/长期约束/关键任务方向
+2. 去除重复与闲聊
+3. 输出 JSON 数组，每项格式 {"content":"...","importance":"high"|"low"}
+4. importance：身份/目标/长期计划为 high，其余为 low
+5. 不要输出其它文字
+
+高优先级原文（含义必须尽量保留）：
+${existingHigh || "(无)"}
+
+全部记忆条目：
+${items.map((i) => `- ${i.content} [${i.importance}]`).join("\n")}
+`;
+  const res = await callOllama([{ role: "user", content: prompt }]);
+  if (!res.ok) return trimMemoryItems(dedupeMemoryItems(items)).slice(0, MAX_COMPRESSED_ITEMS);
+  const data = (await res.json()) as { message?: { content?: string } };
+  const raw = data.message?.content?.trim() || "";
+  try {
+    const parsed = JSON.parse(raw.match(/\[[\s\S]*\]/)?.[0] || raw) as unknown;
+    if (!Array.isArray(parsed)) throw new Error("invalid");
+    const out: MemoryItem[] = [];
+    for (const row of parsed) {
+      if (!row || typeof row !== "object") continue;
+      const content = String((row as { content?: unknown }).content || "").trim();
+      const importance =
+        (row as { importance?: unknown }).importance === "high" ? "high" : "low";
+      if (content) out.push({ content, importance });
+    }
+    const deduped = dedupeMemoryItems(out);
+    return deduped.slice(0, MAX_COMPRESSED_ITEMS);
+  } catch {
+    const lines = splitMemoryLines(raw).slice(0, MAX_COMPRESSED_ITEMS);
+    return lines.map((line) => ({
+      content: line,
+      importance: inferImportanceFromText(line),
+    }));
+  }
+}
+
+/** 根据体积阈值决定是否触发 secondaryCompressItems，并最终 trim。 */
+async function maybeEvolveMemoryItems(items: MemoryItem[]): Promise<MemoryItem[]> {
+  let next = dedupeMemoryItems(items);
+  const charLen = memoryItemsCharLength(next);
+  if (charLen >= SECONDARY_COMPRESS_THRESHOLD_CHARS || next.length > 12) {
+    next = await secondaryCompressItems(next);
+  }
+  return trimMemoryItems(next);
+}
+
+/**
+ * 将被移出短期窗口的旧对话压缩成若干 MemoryItem，合并进长期记忆。
+ * 用于在消息很长时把关键信息「沉淀」下来而不是直接丢弃。
+ */
+async function summarizeForMemory(
+  oldMessages: ChatMessage[],
+  existingItems: MemoryItem[]
+): Promise<MemoryItem[]> {
+  const dialogue = oldMessages
+    .map((m) => `${m.role === "user" ? "用户" : "助手"}: ${m.content}`)
+    .join("\n");
+
+  const existingText = formatMemoryBlock(existingItems);
+
+  const prompt = `
+请总结对话，用于长期记忆：
+
+要求：
+1. 只保留关键信息（身份 / 目标 / 偏好 / 约束）
+2. 删除闲聊内容
+3. 输出 JSON 数组，每项 {"content":"...","importance":"high"|"low"}
+4. importance：身份/目标/偏好/长期约束为 high，否则 low
+5. 不要重复已有事实
+
+已有长期记忆：
+${existingText || "(空)"}
+
+待压缩对话：
+${dialogue}
+`;
+
+  const res = await callOllama([{ role: "user", content: prompt }]);
+  if (!res.ok) return [];
+  const data = (await res.json()) as { message?: { content?: string } };
+  const raw = data.message?.content?.trim() || "";
+  try {
+    const parsed = JSON.parse(raw.match(/\[[\s\S]*\]/)?.[0] || raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const out: MemoryItem[] = [];
+    for (const row of parsed) {
+      if (!row || typeof row !== "object") continue;
+      const content = String((row as { content?: unknown }).content || "").trim();
+      const importance =
+        (row as { importance?: unknown }).importance === "high" ? "high" : "low";
+      if (content) out.push({ content, importance });
+    }
+    return out;
+  } catch {
+    const lines = splitMemoryLines(raw);
+    return lines.map((line) => ({
+      content: line,
+      importance: inferImportanceFromText(line),
+    }));
+  }
+}
+
+/**
+ * 不调用模型：仅用正则从用户话术中抓取「自我介绍/目标」类句子，标记为 high。
+ */
+function extractRuleBasedMemory(messages: ChatMessage[]): MemoryItem[] {
+  return messages
+    .filter((m) => m.role === "user" && LONG_TERM_RULE_PATTERN.test(m.content))
+    .map((m) => ({
+      content: m.content.trim(),
+      importance: "high" as MemoryImportance,
+    }));
+}
+
+/**
+ * 核心记忆管线：归一化入参 → 可选总结旧消息 → 规则抽取 → 可能二次压缩 →
+ * 产出 Memory 与喂给后续聊天/路由用的 modelMessages（system 记忆块 + shortTerm）。
+ */
+async function buildMemory(
+  incomingMessages: ChatMessage[],
+  incomingMemory?: IncomingMemoryPayload
+): Promise<{ memory: Memory; modelMessages: Array<{ role: string; content: string }> }> {
+  let items = normalizeIncomingMemoryPayload(incomingMemory);
+
+  const shouldSummarize = incomingMessages.length > MAX_CONTEXT_MESSAGES;
+  const shortTerm = incomingMessages.slice(-SHORT_TERM_SIZE);
+  const oldMessages = shouldSummarize ? incomingMessages.slice(0, -SHORT_TERM_SIZE) : [];
+
+  if (oldMessages.length > 0) {
+    const summarized = await summarizeForMemory(oldMessages, items);
+    items = appendMemoryItems(items, summarized);
+  }
+
+  items = appendMemoryItems(items, extractRuleBasedMemory(incomingMessages));
+  items = await maybeEvolveMemoryItems(items);
+
+  const memory: Memory = { shortTerm, items };
+
+  const highText = formatMemoryBlock(memory.items, "high");
+  const lowText = formatMemoryBlock(memory.items, "low");
+  const modelMessages: Array<{ role: string; content: string }> = [];
+  if (highText || lowText) {
+    modelMessages.push({
+      role: "system",
+      content: [
+        highText ? `【高优先级长期记忆】\n${highText}` : "",
+        lowText ? `【其他长期记忆】\n${lowText}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    });
+  }
+  modelMessages.push(...memory.shortTerm);
+  return { memory, modelMessages };
+}
+
+/**
+ * 从用户或 keyword 字段里解析城市名：先完整匹配 cityMap 键，再对清理后的串做子串匹配。
+ */
+function extractWeatherCity(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  for (const city of Object.keys(cityMap)) {
+    if (trimmed.includes(city)) return city;
+  }
+  const cleaned = trimmed
+    .replace(/[，。！？、,.!?]/g, "")
+    .replace(/\s+/g, "")
+    .replace(/帮我|请|一下|查一下|查下|查一查|查|查询|搜索/g, "")
+    .replace(/天气预报|天气情况|天气|温度|气温/g, "")
+    .replace(/的/g, "");
+  for (const city of Object.keys(cityMap)) {
+    if (cleaned.includes(city)) return city;
+  }
+  return cleaned;
+}
+
+/** 取最近一条 user 消息的文本，供路由与工具缺省输入使用。 */
+function getLatestUserText(messages: ChatMessage[]): string {
+  return [...messages].reverse().find((m) => m.role === "user")?.content?.trim() || "";
+}
+
+/**
+ * 当路由把 action 判为 chat 但 content 为空时，用完整 modelMessages 再走一轮普通对话。
+ */
+async function generateFallbackChat(
+  messages: Array<{ role: string; content: string }>
+): Promise<string> {
+  const fallbackRes = await callOllama([
+    {
+      role: "system",
+      content: "你是一个简洁、友好的中文助手。请直接回答用户，不要输出 JSON。",
+    },
+    ...messages,
+  ]);
+  if (!fallbackRes.ok) return "抱歉，我现在暂时无法正常回答，请稍后再试。";
+  const fallbackData = (await fallbackRes.json()) as { message?: { content?: string } };
+  return (
+    fallbackData.message?.content?.trim() || "抱歉，我现在暂时无法正常回答，请稍后再试。"
+  );
+}
+
+/** 总结工具：取最近若干轮对话拼成文本；若无则退回路由给出的 fallback。 */
+function pickSummaryContext(messages: ChatMessage[], fallbackText: string): string {
+  const recent = messages.slice(-6);
+  const context = recent
+    .map((m) => `${m.role === "user" ? "用户" : "助手"}: ${m.content}`)
+    .join("\n");
+  return context || fallbackText;
+}
+
+/** summary 分支：按固定格式生成要点列表，并注入高优先级记忆作为目标参考。 */
+async function summarizeWithModel(
+  messages: ChatMessage[],
+  fallbackText: string,
+  memory: Memory
+) {
+  const content = pickSummaryContext(messages, fallbackText);
+  const memHint = formatMemoryBlock(memory.items, "high");
+  const prompt = `
+请总结以下对话，要求：
+1. 提取关键信息
+2. 用 3-5 条要点表达
+3. 输出格式为纯文本项目符号，每行以"- "开头
+4. 最后一行给出"结论："和"下一步："
+5. 可参考用户长期目标（若有）：
+${memHint || "(无)"}
+
+对话：
+${content}
+`;
+  const res = await callOllama([{ role: "user", content: prompt }]);
+  if (!res.ok) {
+    return "总结失败：模型暂时不可用，请稍后重试。";
+  }
+  const data = (await res.json()) as { message?: { content?: string } };
+  const text = data.message?.content?.trim();
+  return text || "总结失败：未获取到有效结果。";
+}
+
+/** 尝试把模型输出解析为 TodoItem[]（严格 JSON 数组）；失败返回 null。 */
+function parseTodoItemsFromText(raw: string): TodoItem[] | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const todos = parsed
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const task =
+          typeof (item as { task?: unknown }).task === "string"
+            ? (item as { task: string }).task.trim()
+            : "";
+        const done = Boolean((item as { done?: unknown }).done);
+        if (!task) return null;
+        return { task, done };
+      })
+      .filter((v): v is TodoItem => Boolean(v));
+    return todos.length > 0 ? todos : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * todo 分支：结合用户当前输入与长期记忆生成个性化任务列表；
+ * 解析失败时使用内置占位任务，保证前端总能渲染出列表。
+ */
+async function generateTodosWithModel(args: { userInput: string; memory: Memory }): Promise<TodoItem[]> {
+  const { userInput, memory } = args;
+  const highBlock = formatMemoryBlock(memory.items, "high");
+  const lowBlock = formatMemoryBlock(memory.items, "low");
+
+  const prompt = `
+请根据用户输入与长期记忆生成个性化待办事项。
+要求：
+1. 返回 JSON 数组
+2. 每项包含 task 和 done
+3. done 默认为 false
+4. 至少返回 3 项；内容须体现用户的身份/目标（若有），避免通用空话模板
+5. 不要输出任何解释
+
+【高优先级记忆】
+${highBlock || "(空)"}
+
+【其他记忆】
+${lowBlock || "(空)"}
+
+用户输入：
+${userInput}
+`;
+  const res = await callOllama([{ role: "user", content: prompt }]);
+  if (!res.ok) {
+    return [
+      { task: "对照记忆澄清本周目标与交付物", done: false },
+      { task: "拆解关键任务并设定验收标准", done: false },
+      { task: "执行并复盘，更新进度", done: false },
+    ];
+  }
+  const data = (await res.json()) as { message?: { content?: string } };
+  const raw = data.message?.content?.trim() || "";
+  const fromDirect = parseTodoItemsFromText(raw);
+  if (fromDirect) return fromDirect;
+
+  const wrapped = raw.match(/\[[\s\S]*\]/)?.[0];
+  const fromWrapped = wrapped ? parseTodoItemsFromText(wrapped) : null;
+  if (fromWrapped) return fromWrapped;
+
+  return [
+    { task: "结合记忆细化当前优先事项", done: false },
+    { task: "推进主线任务并记录阻塞点", done: false },
+    { task: "阶段性复盘并调整后续步骤", done: false },
+  ];
+}
+
+/**
+ * POST 处理器：校验入参 → buildMemory → 路由 → 按 action 分发。
+ * 所有成功路径均返回 JSON 且包含更新后的 memory。
+ */
+export async function POST(req: Request) {
+  const requestStart = Date.now();
+  try {
+    const { messages, memory: incomingMemory } = (await req.json()) as {
+      messages?: ChatMessage[];
+      memory?: IncomingMemoryPayload;
+    };
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return Response.json({ error: "messages is required" }, { status: 400 });
+    }
+
+    const { memory, modelMessages } = await buildMemory(messages, incomingMemory);
+
+    // 路由阶段不附带 buildMemory 里为「最终聊天」准备的 system 记忆块，只喂路由 system + 近期 shortTerm，
+    // 避免同一段长记忆在提示里出现两次、干扰 JSON 格式输出。
+    const routeRes = await callOllama([
+      { role: "system", content: buildRoutingSystemPrompt(memory) },
+      ...memory.shortTerm.map((m) => ({ role: m.role, content: m.content })),
+    ]);
+    if (!routeRes.ok) {
+      const data = await routeRes.json().catch(() => ({}));
+      return Response.json(
+        { error: (data as { error?: string }).error || "Ollama request failed" },
+        { status: 500 }
+      );
+    }
+
+    const routeData = (await routeRes.json()) as { message?: { content?: string } };
+    const modelOutput = (routeData.message?.content || "").trim();
+    let parsed = parseModelOutput(modelOutput);
+    const latestUser = getLatestUserText(memory.shortTerm);
+    parsed = {
+      ...parsed,
+      action: resolveContinuationAction(latestUser, parsed, memory),
+    };
+    // 各工具分支的「主输入」：优先用路由 JSON 的 content，空则回退到用户原话。
+    const toolInput = parsed.content || latestUser;
+    const actionStart = Date.now();
+
+    logAgent("route", {
+      action: parsed.action,
+      input: toolInput,
+      shortTerm: memory.shortTerm.length,
+      memoryItems: memory.items.length,
+      memoryChars: memoryItemsCharLength(memory.items),
+    });
+
+    /** 统一把本轮计算好的 memory 附加到任意业务负载上返回前端。 */
+    function withMemory(body: ChatResponsePayload): ChatResponseBody {
+      return { ...body, memory };
+    }
+
+    switch (parsed.action) {
+      // 天气：keyword/content/最新用户话术中解析城市 → Open-Meteo
+      case "weather": {
+        const keyword = extractWeatherCity(parsed.keyword || parsed.content || latestUser);
+        const result = await realWeather(keyword);
+        logAgent("result", {
+          action: parsed.action,
+          durationMs: Date.now() - actionStart,
+          success: true,
+        });
+        return Response.json(withMemory({ type: "weather", keyword: keyword || "未知", result }));
+      }
+      // 总结：基于短期窗口 + 高优先级记忆做要点归纳
+      case "summary": {
+        const text = await summarizeWithModel(memory.shortTerm, toolInput, memory);
+        logAgent("result", {
+          action: parsed.action,
+          durationMs: Date.now() - actionStart,
+          success: true,
+        });
+        return Response.json(withMemory({ type: "summary", text }));
+      }
+      // 待办：模型生成 JSON 任务列表，失败时用内置占位项
+      case "todo": {
+        const items = await generateTodosWithModel({ userInput: toolInput, memory });
+        logAgent("result", {
+          action: parsed.action,
+          durationMs: Date.now() - actionStart,
+          success: true,
+        });
+        return Response.json(withMemory({ type: "todo", items }));
+      }
+      // 默认闲聊：若路由给了 content 则直接使用，否则用 modelMessages 走第二轮生成
+      default: {
+        const chatContent =
+          parsed.content.trim().length > 0
+            ? parsed.content
+            : await generateFallbackChat(modelMessages);
+        logAgent("result", {
+          action: parsed.action,
+          durationMs: Date.now() - actionStart,
+          success: true,
+        });
+        return Response.json(withMemory({ type: "chat", content: chatContent }));
+      }
+    }
+  } catch (error) {
+    logAgent("error", {
+      success: false,
+      durationMs: Date.now() - requestStart,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return Response.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+/**
+ * 调用 Open-Meteo 公开接口获取当前天气；仅支持 cityMap 中已配置的城市。
+ */
+async function realWeather(city: string): Promise<string> {
+  const location = cityMap[city];
+  if (!location) return "暂不支持该城市（当前仅支持：北京、上海）";
+  const res = await fetch(
+    `https://api.open-meteo.com/v1/forecast?latitude=${location.lat}&longitude=${location.lon}&current_weather=true`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) return "天气服务暂时不可用，请稍后再试";
+  const data = (await res.json()) as {
+    current_weather?: { temperature?: number; windspeed?: number };
+  };
+  const temperature = data.current_weather?.temperature;
+  const windspeed = data.current_weather?.windspeed;
+  if (typeof temperature !== "number") return "未获取到实时天气数据，请稍后重试";
+  const windText = typeof windspeed === "number" ? `，风速：${windspeed}km/h` : "";
+  return `当前温度：${temperature}°C${windText}`;
+}
