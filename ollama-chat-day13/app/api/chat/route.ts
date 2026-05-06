@@ -723,6 +723,48 @@ ${userInput}
 /** Planner 输出的单步草案（无 id/status，由执行器补全）。 */
 type PlannerPlanItem = { name: string; action: WorkflowStepAction; input: string };
 
+/**
+ * Planner 有时会把 input 写成对象（如 { city: "北京" }）；直接 String(obj) 会得到 "[object Object]"。
+ * 这里优先抽取常见字段，否则 JSON 序列化，保证下游天气解析与前端展示可读。
+ */
+function normalizePlannerStepInput(raw: unknown): string {
+  if (raw == null) return "";
+  if (typeof raw === "string") return raw.trim();
+  if (typeof raw === "number" || typeof raw === "boolean") return String(raw);
+  if (Array.isArray(raw)) {
+    try {
+      return JSON.stringify(raw);
+    } catch {
+      return "";
+    }
+  }
+  if (typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    const preferKeys = [
+      "city",
+      "location",
+      "place",
+      "keyword",
+      "query",
+      "content",
+      "text",
+      "prompt",
+      "input",
+      "description",
+    ];
+    for (const key of preferKeys) {
+      const v = o[key];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+    try {
+      return JSON.stringify(o);
+    } catch {
+      return "";
+    }
+  }
+  return String(raw).trim();
+}
+
 /** 解析 Planner 返回的 JSON 数组（允许多级容错）。 */
 function parsePlannerPlanOutput(modelOutput: string): PlannerPlanItem[] {
   try {
@@ -732,7 +774,7 @@ function parsePlannerPlanOutput(modelOutput: string): PlannerPlanItem[] {
     for (const row of parsed) {
       if (!row || typeof row !== "object") continue;
       const name = String((row as { name?: unknown }).name || "").trim() || "步骤"; // 步骤名
-      const input = String((row as { input?: unknown }).input || "").trim(); // 步骤输入
+      const input = normalizePlannerStepInput((row as { input?: unknown }).input); // 步骤输入（兼容对象）
       const action = normalizeWorkflowAction((row as { action?: unknown }).action); // 动作
       out.push({ name, action, input: input || name }); // 缺 input 时用 name 占位
     }
@@ -762,7 +804,7 @@ async function planWorkflowSteps(userInput: string, memory: Memory): Promise<Pla
 
 要求：
 1. 只返回 JSON 数组
-2. 每个步骤包含 name、action、input
+2. 每个步骤包含 name、action、input；input 必须是字符串（天气步骤写城市名或含城市名的短句，如「北京」），不要嵌套 JSON 对象
 3. 不要输出解释
 
 用户需求：
@@ -866,7 +908,9 @@ async function executeWorkflow(workflow: Workflow, memory: Memory): Promise<Work
         }); // 待办
       } else if (step.action === "weather") {
         const latestUser = getLatestUserText(memory.shortTerm); // 最近用户话
-        const keyword = extractWeatherCity(step.input || latestUser); // 城市解析
+        const stepText =
+          step.input && step.input !== "[object Object]" ? step.input : ""; // 规避历史 String(object) 污染
+        const keyword = extractWeatherCity(stepText || latestUser); // 城市解析（对象 input 已在上游规范化）
         out = await realWeather(keyword); // 天气（声明在后，运行时已初始化）
       } else {
         out = await runWorkflowChat(step.input, priorOutputText || undefined, memory); // 聊天
