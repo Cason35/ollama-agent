@@ -8,6 +8,11 @@ import {
   useState,
 } from "react"; // 引入类型与 Hooks：表单事件、副作用、DOM 引用、状态
 
+import { MIMO_MODEL_IDS, MIMO_MODEL_OPTIONS } from "@/lib/mimo-models"; // MiMo 模型 id 白名单与下拉展示配置
+
+/** 与 `/api/chat` 请求体 `provider` 对齐 */
+type ChatProvider = "local" | "mimo"; // 本地 Ollama 或云端小米 MiMo
+
 // 与后端 `/api/chat` 对齐的单条对话消息（仅文本）
 type ChatMessage = {
   role: "user" | "assistant"; // 说话方角色
@@ -37,22 +42,22 @@ type TodoItem = {
 
 /** 工作流单步（与后端 route.ts 对齐）。 */
 type WorkflowStep = {
-  id: string;
-  name: string;
-  action: "chat" | "summary" | "todo" | "weather";
-  input: string;
-  status: "pending" | "running" | "success" | "failed";
-  output?: unknown;
-  error?: string;
-  durationMs?: number;
+  id: string; // 步骤唯一 id（列表渲染 key）
+  name: string; // 步骤展示名称
+  action: "chat" | "summary" | "todo" | "weather"; // 本步工具类型（与后端一致）
+  input: string; // 传给后端的文本入参摘要
+  status: "pending" | "running" | "success" | "failed"; // UI 状态机
+  output?: unknown; // 成功后可选的中间结果（本页 mainly 展示状态时忽略细节）
+  error?: string; // 失败错误信息（若有则显示在列表行内）
+  durationMs?: number; // 服务端记录的该步毫秒耗时（用于徽章展示）
 };
 
 /** 多步骤任务容器。 */
 type Workflow = {
-  id: string;
-  goal: string;
-  steps: WorkflowStep[];
-  status: "pending" | "running" | "success" | "failed";
+  id: string; // 工作流实例 id
+  goal: string; // 用户本轮目标简述（用作卡片标题后缀）
+  steps: WorkflowStep[]; // 各步骤与状态列表
+  status: "pending" | "running" | "success" | "failed"; // 整单状态（与服务端一致）
 };
 
 // API 成功响应的联合类型，按 type 分发 UI
@@ -98,10 +103,10 @@ function apiToAssistant(data: ChatApiResult): AssistantBubble {
   } // 结束 summary
   if (data.type === "workflow") {
     return {
-      role: "assistant",
-      variant: "workflow",
-      workflow: data.workflow,
-      finalSummary: data.finalSummary,
+      role: "assistant", // 助手气泡
+      variant: "workflow", // 使用工作流专用卡片 UI
+      workflow: data.workflow, // 完整步骤与状态供进度列表渲染
+      finalSummary: data.finalSummary, // 服务端汇总后的最终答复正文
     };
   }
   // 默认待办类型
@@ -116,6 +121,8 @@ export default function HomePage() {
   const [errorText, setErrorText] = useState(""); // 顶部错误提示
   const [memory, setMemory] = useState<Memory>({ shortTerm: [], items: [] }); // 记忆状态初始为空
   const [useWorkflow, setUseWorkflow] = useState(false); // 是否启用多步 Workflow 模式
+  const [provider, setProvider] = useState<ChatProvider>("local"); // 本地 Ollama 或小米 MiMo
+  const [mimoModel, setMimoModel] = useState<string>(MIMO_MODEL_IDS[0]); // MiMo 模型 id
   const listRef = useRef<HTMLDivElement>(null); // 消息列表滚动容器
   const pendingBubblesRef = useRef<Bubble[] | null>(null); // RAF 批处理待提交快照
   const rafIdRef = useRef<number | null>(null); // 当前 requestAnimationFrame id
@@ -168,8 +175,8 @@ export default function HomePage() {
               ? { role: "assistant" as const, content: b.text }
               : b.variant === "workflow"
                 ? {
-                    role: "assistant" as const,
-                    content: `【Workflow】${b.workflow.goal}\n${b.finalSummary}`,
+                    role: "assistant" as const, // 记入请求历史的助手角色
+                    content: `【Workflow】${b.workflow.goal}\n${b.finalSummary}`, // 扁化为单行文本摘要供后续轮次上下文使用
                   }
                 : {
                     role: "assistant" as const,
@@ -188,7 +195,13 @@ export default function HomePage() {
       const res = await fetch("/api/chat", {
         method: "POST", // POST JSON
         headers: { "Content-Type": "application/json" }, // 声明 JSON
-        body: JSON.stringify({ messages: withUser, memory, useWorkflow }), // 消息 + 记忆 + Workflow 开关
+        body: JSON.stringify({
+          messages: withUser, // 含历史与本轮用户气泡对应的 ChatMessage[]
+          memory, // 上轮回传的 Memory，闭环持久化
+          useWorkflow, // 是否启用后端多步 Planner+Executor
+          provider, // local / mimo 选择
+          mimoModel, // 仅 mimo 时生效的模型 id
+        }), // POST 体与 route.ts 约定一致
       }); // fetch 结束
 
       if (!res.ok) {
@@ -207,7 +220,7 @@ export default function HomePage() {
       scheduleBubblesCommit([...nextBubbles, apiToAssistant(data)]); // 追加助手气泡
     } catch (error) {
       console.error(error); // 控制台记录异常
-      setErrorText("网络异常，请检查 Ollama 与网络连接"); // 用户提示
+      setErrorText("网络异常，请检查本机网络、Ollama 或小米 API 配置"); // 用户提示
       scheduleBubblesCommit([
         ...nextBubbles,
         { role: "assistant", variant: "chat", content: "Network error" },
@@ -222,206 +235,355 @@ export default function HomePage() {
     handleSend(); // 走异步发送
   } // handleSubmit 结束
 
+  const selectFieldClass =
+    "rounded-xl bg-zinc-100/90 px-3 py-2 text-sm text-zinc-900 ring-1 ring-zinc-200/80 transition hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-violet-500/40 dark:bg-zinc-800/90 dark:text-zinc-100 dark:ring-zinc-700 dark:hover:bg-zinc-800 dark:focus:ring-violet-400/30";
+
   return (
-    <main className="mx-auto min-h-screen max-w-5xl p-8">
-      {/* Day12 标题 */}
-      <h1 className="mb-6 text-2xl font-bold">Day 13 - Workflow Agent（Planner + Executor）</h1>
-      <p className="mb-4 text-sm text-zinc-600">
-        勾选「Workflow 多步骤模式」后发送复杂需求（如「规划明天学习任务并生成待办」），可观察步骤执行过程与最终结果。
-        普通模式仍走 Day12 单步路由 + Memory。
-      </p>
+    <main className="font-sans">
+      <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-zinc-100 via-white to-violet-50 dark:from-zinc-950 dark:via-zinc-900 dark:to-violet-950/40">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-40 dark:opacity-25"
+          aria-hidden
+          style={{
+            backgroundImage: `radial-gradient(ellipse 80% 50% at 50% -20%, rgb(139 92 246 / 0.22), transparent),
+              radial-gradient(ellipse 60% 40% at 100% 100%, rgb(56 189 248 / 0.12), transparent)`,
+          }}
+        />
 
-      {/* 响应式两栏：大屏 2:1，小屏堆叠 */}
-      <div className="grid gap-4 lg:grid-cols-[2fr,1fr]">
-        {/* 左侧：对话与输入 */}
-        <section>
-          {/* 输入表单 */}
-          <form onSubmit={handleSubmit} className="mb-3 flex flex-wrap items-center gap-3">
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
-              <input
-                type="checkbox"
-                checked={useWorkflow}
-                onChange={(e) => setUseWorkflow(e.target.checked)}
-                disabled={loading}
-              />
-              Workflow 多步骤模式
-            </label>
-            <input
-              className="min-w-[200px] flex-1 rounded border border-zinc-300 bg-white px-3 py-2 text-black dark:border-zinc-600 dark:bg-zinc-900 dark:text-white"
-              value={input}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setInput(e.target.value)}
-              disabled={loading}
-              placeholder="输入消息..."
-              maxLength={2000}
-            />
-            <button
-              type="submit"
-              disabled={loading}
-              className="rounded bg-black px-4 py-2 text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-black"
-            >
-              {loading ? "处理中..." : "发送"}
-            </button>
-          </form>
+        <div className="relative mx-auto flex min-h-screen max-w-[1280px] flex-col px-4 pb-6 pt-5 sm:px-6 lg:px-8">
+          <header className="shrink-0 border-b border-zinc-200/70 pb-5 dark:border-zinc-800/80">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-widest text-violet-600 dark:text-violet-400">
+                  Day 13
+                </p>
+                <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-3xl">
+                  Workflow Agent
+                </h1>
+                <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+                  单步路由与 Memory；开启 Workflow 可拆解多步任务。后端可选本地 Ollama 或小米 MiMo，密钥写在{" "}
+                  <code className="rounded-md bg-zinc-200/70 px-1.5 py-0.5 font-mono text-xs text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200">
+                    .env.local
+                  </code>
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <span className="inline-flex items-center rounded-full bg-white/80 px-3 py-1 text-xs font-medium text-zinc-600 ring-1 ring-zinc-200/80 backdrop-blur dark:bg-zinc-900/80 dark:text-zinc-300 dark:ring-zinc-700">
+                  {provider === "local" ? "本地推理" : "云端 MiMo"}
+                </span>
+                {useWorkflow ? (
+                  <span className="inline-flex items-center rounded-full bg-violet-500/15 px-3 py-1 text-xs font-medium text-violet-800 ring-1 ring-violet-500/25 dark:text-violet-200">
+                    Workflow 开
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </header>
 
-          {errorText ? <p className="mb-3 text-sm text-red-600">{errorText}</p> : null}
+          <div className="flex min-h-0 flex-1 flex-col gap-4 pt-5 lg:flex-row lg:gap-5">
+            {/* 对话主栏 */}
+            <section className="flex min-h-[480px] flex-1 flex-col overflow-hidden rounded-2xl border border-zinc-200/80 bg-white/75 shadow-xl shadow-zinc-900/5 ring-1 ring-white/60 backdrop-blur-md dark:border-zinc-800/90 dark:bg-zinc-900/70 dark:shadow-black/40 dark:ring-zinc-700/40 lg:min-h-[calc(100dvh-11rem)]">
+              <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-zinc-200/70 px-4 py-3 dark:border-zinc-800/80">
+                <label className="inline-flex cursor-pointer select-none items-center gap-2 rounded-xl bg-zinc-100/90 px-3 py-2 text-sm text-zinc-700 ring-1 ring-zinc-200/80 dark:bg-zinc-800/80 dark:text-zinc-300 dark:ring-zinc-700">
+                  <input
+                    type="checkbox" // 复选框控件
+                    className="size-4 rounded border-zinc-300 text-violet-600 focus:ring-violet-500" // 小号方形勾选样式
+                    checked={useWorkflow} // 受控：是否走后端 workflow 分支
+                    onChange={(e) => setUseWorkflow(e.target.checked)} // 切换时更新状态
+                    disabled={loading} // 请求中禁止改动避免竞态
+                  />
+                  多步 Workflow
+                </label>
 
-          <div
-            ref={listRef}
-            className="max-h-[65vh] min-h-[220px] space-y-3 overflow-y-auto rounded border border-zinc-200 p-4 dark:border-zinc-700"
-          >
-            {bubbles.length === 0 ? (
-              <p className="text-zinc-500">聊天记录会显示在这里</p>
-            ) : (
-              bubbles.map((msg: Bubble, index: number) => {
-                if (msg.role === "user") {
-                  return (
-                    <div
-                      key={`user-${index}`}
-                      className="ml-8 rounded-lg bg-black px-3 py-2 text-white dark:bg-zinc-100 dark:text-black"
+                <div className="hidden h-6 w-px bg-zinc-200 dark:bg-zinc-700 sm:block" aria-hidden />
+
+                <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
+                  <span className="whitespace-nowrap text-zinc-500 dark:text-zinc-500">后端</span>
+                  <select
+                    className={selectFieldClass} // 与模型下拉共享的圆角选择框样式
+                    value={provider} // 当前提供商
+                    onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+                      setProvider(e.target.value === "mimo" ? "mimo" : "local") // 归一化为联合类型
+                    }
+                    disabled={loading} // 加载中锁定
+                  >
+                    <option value="local">Ollama</option> {/* 本地默认 */}
+                    <option value="mimo">小米 MiMo</option> {/* 云端兼容 API */}
+                  </select>
+                </label>
+
+                {provider === "mimo" ? (
+                  // 仅在选择 MiMo 时展示具体模型下拉，避免本地模式误触
+                  <label className="flex min-w-0 flex-1 items-center gap-2 text-sm text-zinc-600 sm:max-w-[280px] dark:text-zinc-400">
+                    <span className="shrink-0 whitespace-nowrap text-zinc-500 dark:text-zinc-500">模型</span>
+                    <select
+                      className={`${selectFieldClass} min-w-0 flex-1 truncate`} // 下拉占满剩余宽并截断长尾文案
+                      value={mimoModel} // 与请求体 mimoModel 同步
+                      onChange={(e: ChangeEvent<HTMLSelectElement>) => setMimoModel(e.target.value)} // 选定 apiId 写回状态
+                      disabled={loading} // 请求中禁止切换模型
                     >
-                      <p className="mb-1 text-xs opacity-70">你</p>
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                  {MIMO_MODEL_OPTIONS.map(({ apiId, label }) => (
+                    <option key={apiId} value={apiId}>
+                      {/* 展示友好名称；value 为后端校验用的 api id */}
+                      {label}
+                    </option>
+                  ))}
+                    </select>
+                  </label>
+                ) : null}
+              </div>
+
+              {errorText ? (
+                <div className="shrink-0 border-b border-red-200/80 bg-red-50/90 px-4 py-2.5 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+                  {errorText}
+                </div>
+              ) : null}
+
+              <div
+                ref={listRef}
+                className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-5"
+              >
+                {bubbles.length === 0 && !loading ? (
+                  <div className="flex h-full min-h-[200px] flex-col items-center justify-center gap-3 px-4 text-center">
+                    <div className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500/20 to-sky-500/15 ring-1 ring-violet-500/20">
+                      <span className="text-2xl" aria-hidden>
+                        ◈
+                      </span>
                     </div>
-                  );
-                }
-
-                if (msg.variant === "chat") {
-                  return (
-                    <div
-                      key={`asst-${index}`}
-                      className="mr-8 rounded-lg bg-zinc-100 px-3 py-2 text-black dark:bg-zinc-800 dark:text-zinc-50"
-                    >
-                      <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">助手</p>
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
-                    </div>
-                  );
-                }
-
-                if (msg.variant === "weather") {
-                  return (
-                    <div
-                      key={`weather-${index}`}
-                      className="mr-8 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sky-950 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-100"
-                    >
-                      <p className="mb-1 text-xs opacity-80">天气</p>
-                      <p className="whitespace-pre-wrap">
-                        <span className="font-medium">{msg.keyword}</span> · {msg.result}
+                    <div>
+                      <p className="text-base font-medium text-zinc-800 dark:text-zinc-100">开始对话</p>
+                      <p className="mt-1 max-w-sm text-sm text-zinc-500 dark:text-zinc-400">
+                        试试天气、总结、待办，或打开 Workflow 描述一个多步骤任务。
                       </p>
                     </div>
-                  );
-                }
+                  </div>
+                ) : null}
 
-                if (msg.variant === "summary") {
-                  return (
-                    <div
-                      key={`summary-${index}`}
-                      className="mr-8 overflow-hidden rounded-xl border border-amber-200 bg-amber-50 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/30"
-                    >
-                      <p className="border-b border-amber-200/80 px-3 py-2 text-xs font-medium text-amber-900 dark:border-amber-800/50 dark:text-amber-200">
-                        总结
-                      </p>
-                      <p className="px-3 py-3 text-sm whitespace-pre-wrap text-amber-950 dark:text-amber-50">
-                        {msg.text}
-                      </p>
-                    </div>
-                  );
-                }
+                {bubbles.map((msg: Bubble, index: number) => {
+                  if (msg.role === "user") {
+                    return (
+                      <div key={`user-${index}`} className="flex justify-end">
+                        <div className="max-w-[min(100%,36rem)] rounded-2xl rounded-br-md bg-gradient-to-br from-violet-600 to-indigo-600 px-4 py-3 text-white shadow-lg shadow-violet-600/20">
+                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/70">
+                            你
+                          </p>
+                          <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{msg.content}</p>
+                        </div>
+                      </div>
+                    );
+                  }
 
-                if (msg.variant === "workflow") {
+                  if (msg.variant === "chat") {
+                    return (
+                      <div key={`asst-${index}`} className="flex justify-start">
+                        <div className="max-w-[min(100%,36rem)] rounded-2xl rounded-bl-md border border-zinc-200/90 bg-zinc-50/95 px-4 py-3 shadow-sm dark:border-zinc-700 dark:bg-zinc-800/90">
+                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                            助手
+                          </p>
+                          <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-zinc-800 dark:text-zinc-100">
+                            {msg.content}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (msg.variant === "weather") {
+                    return (
+                      <div key={`weather-${index}`} className="flex justify-start">
+                        <div className="max-w-[min(100%,36rem)] overflow-hidden rounded-2xl rounded-bl-md border border-sky-200/90 bg-gradient-to-br from-sky-50 to-cyan-50/80 shadow-sm dark:border-sky-800/60 dark:from-sky-950/50 dark:to-cyan-950/30">
+                          <p className="border-b border-sky-200/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-sky-700 dark:border-sky-800/50 dark:text-sky-300">
+                            天气
+                          </p>
+                          <p className="px-4 py-3 text-[15px] leading-relaxed whitespace-pre-wrap text-sky-950 dark:text-sky-50">
+                            <span className="font-semibold">{msg.keyword}</span>
+                            <span className="text-sky-600 dark:text-sky-400"> · </span>
+                            {msg.result}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (msg.variant === "summary") {
+                    return (
+                      <div key={`summary-${index}`} className="flex justify-start">
+                        <div className="max-w-[min(100%,36rem)] overflow-hidden rounded-2xl rounded-bl-md border border-amber-200/90 bg-gradient-to-br from-amber-50 to-orange-50/60 shadow-sm dark:border-amber-900/40 dark:from-amber-950/35 dark:to-orange-950/20">
+                          <p className="border-b border-amber-200/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:border-amber-800/40 dark:text-amber-200">
+                            总结
+                          </p>
+                          <p className="px-4 py-3 text-[15px] leading-relaxed whitespace-pre-wrap text-amber-950 dark:text-amber-50">
+                            {msg.text}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (msg.variant === "workflow") {
+                    return (
+                      <div key={`workflow-${index}`} className="flex justify-start">
+                        {/* 工作流卡片：上方目标 + 中间步骤列表 + 底部最终总结 */}
+                        <div className="max-w-[min(100%,40rem)] overflow-hidden rounded-2xl rounded-bl-md border border-violet-200/90 bg-gradient-to-br from-violet-50 to-fuchsia-50/50 shadow-md dark:border-violet-900/45 dark:from-violet-950/40 dark:to-fuchsia-950/25">
+                          <p className="border-b border-violet-200/70 px-4 py-2.5 text-xs font-semibold text-violet-900 dark:border-violet-800/40 dark:text-violet-100">
+                            Workflow · {msg.workflow.goal} {/* 展示本轮工作流目标 */}
+                          </p>
+                          <ul className="space-y-2 px-4 py-3 text-sm text-violet-950 dark:text-violet-50">
+                            {msg.workflow.steps.map((step) => (
+                              <li key={step.id} className="flex flex-wrap items-baseline gap-2">
+                                <span className="text-base" aria-hidden>
+                                  {step.status === "success"
+                                    ? "✓" // 成功勾
+                                    : step.status === "failed"
+                                      ? "✕" // 失败叉
+                                      : step.status === "running"
+                                        ? "…" // 进行中省略号
+                                        : "○"} {/* 未开始空心圆 */}
+                                </span>
+                                <span className="font-medium">{step.name}</span> {/* 步骤名称 */}
+                                <span className="rounded-md bg-violet-500/10 px-1.5 py-0.5 font-mono text-[10px] text-violet-700 dark:text-violet-300">
+                                  {step.action} {/* 工具类型 */}
+                                  {typeof step.durationMs === "number" ? ` · ${step.durationMs}ms` : ""} {/* 可选耗时 */}
+                                </span>
+                                {step.error ? (
+                                  <span className="text-xs text-red-600 dark:text-red-400">{step.error}</span> // 失败时内联错误
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                          <div className="border-t border-violet-200/70 bg-violet-500/5 px-4 py-3 dark:border-violet-800/40">
+                            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-violet-800 dark:text-violet-300">
+                              最终结果
+                            </p>
+                            <p className="whitespace-pre-wrap text-sm leading-relaxed text-violet-950 dark:text-violet-50">
+                              {msg.finalSummary} {/* 服务端汇总后的答复 */}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
                   return (
-                    <div
-                      key={`workflow-${index}`}
-                      className="mr-8 overflow-hidden rounded-xl border border-violet-200 bg-violet-50 shadow-sm dark:border-violet-900/50 dark:bg-violet-950/30"
-                    >
-                      <p className="border-b border-violet-200/80 px-3 py-2 text-xs font-medium text-violet-900 dark:border-violet-800/50 dark:text-violet-200">
-                        Workflow：{msg.workflow.goal}
-                      </p>
-                      <ul className="space-y-1.5 px-3 py-2 text-sm text-violet-950 dark:text-violet-50">
-                        {msg.workflow.steps.map((step) => (
-                          <li key={step.id} className="flex flex-wrap items-baseline gap-2">
-                            <span aria-hidden="true">
-                              {step.status === "success"
-                                ? "✅"
-                                : step.status === "failed"
-                                  ? "❌"
-                                  : step.status === "running"
-                                    ? "⏳"
-                                    : "⏸"}
-                            </span>
-                            <span className="font-medium">{step.name}</span>
-                            <span className="text-xs text-violet-600 dark:text-violet-400">
-                              [{step.action}]
-                              {typeof step.durationMs === "number" ? ` · ${step.durationMs}ms` : ""}
-                            </span>
-                            {step.error ? (
-                              <span className="text-xs text-red-600 dark:text-red-400">{step.error}</span>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
-                      <div className="border-t border-violet-200/80 px-3 py-3 dark:border-violet-800/50">
-                        <p className="mb-1 text-xs font-semibold text-violet-900 dark:text-violet-200">
-                          最终结果
+                    <div key={`todo-${index}`} className="flex justify-start">
+                      <div className="max-w-[min(100%,36rem)] rounded-2xl rounded-bl-md border border-emerald-200/90 bg-gradient-to-br from-emerald-50 to-teal-50/50 px-4 py-3 shadow-sm dark:border-emerald-800/50 dark:from-emerald-950/35 dark:to-teal-950/20">
+                        <p className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-300">
+                          待办
                         </p>
-                        <p className="whitespace-pre-wrap text-sm text-violet-950 dark:text-violet-50">
-                          {msg.finalSummary}
-                        </p>
+                        <ul className="space-y-2.5 text-sm text-emerald-950 dark:text-emerald-50">
+                          {msg.items.map((item: TodoItem, i: number) => (
+                            <li key={i} className="flex items-start gap-3">
+                              <input
+                                type="checkbox"
+                                className="mt-0.5 size-4 shrink-0 rounded border-emerald-300 text-emerald-600"
+                                checked={item.done}
+                                readOnly
+                              />
+                              <span className="leading-relaxed">{item.task}</span>
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     </div>
                   );
-                }
+                })}
 
-                return (
-                  <div
-                    key={`todo-${index}`}
-                    className="mr-8 rounded-lg border border-emerald-200 bg-emerald-50/90 px-3 py-2 dark:border-emerald-800 dark:bg-emerald-950/40"
-                  >
-                    <p className="mb-2 text-xs font-medium text-emerald-900 dark:text-emerald-200">
-                      待办计划
-                    </p>
-                    <ul className="space-y-1 text-sm text-emerald-950 dark:text-emerald-50">
-                      {msg.items.map((item: TodoItem, i: number) => (
-                        <li key={i} className="flex items-center gap-2">
-                          <input type="checkbox" checked={item.done} readOnly />
-                          <span>{item.task}</span>
-                        </li>
-                      ))}
-                    </ul>
+                {loading ? (
+                  <div className="flex justify-start">
+                    <div className="flex items-center gap-3 rounded-2xl rounded-bl-md border border-zinc-200/90 bg-zinc-50/95 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-800/90">
+                      <div className="flex gap-1">
+                        <span className="size-2 animate-bounce rounded-full bg-violet-400 [animation-duration:0.6s]" />
+                        <span className="size-2 animate-bounce rounded-full bg-violet-400 [animation-delay:0.12s] [animation-duration:0.6s]" />
+                        <span className="size-2 animate-bounce rounded-full bg-violet-400 [animation-delay:0.24s] [animation-duration:0.6s]" />
+                      </div>
+                      <span className="text-sm text-zinc-500 dark:text-zinc-400">正在思考…</span>
+                    </div>
                   </div>
-                );
-              })
-            )}
-          </div>
-        </section>
+                ) : null}
+              </div>
 
-        {/* 右侧：Memory 调试 — items 列表 + importance 样式 */}
-        <aside className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
-          <h3 className="mb-2 text-sm font-semibold">🧠 Memory Debug</h3>
-          <p className="mb-2 text-xs text-zinc-500">
-            shortTerm: {memory.shortTerm.length} 条 · items: {memory.items.length} 条
-          </p>
-          <ul className="max-h-[55vh] space-y-2 overflow-auto rounded bg-zinc-100 p-3 text-xs text-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
-            {memory.items.length === 0 ? (
-              <li>(暂无长期记忆条目)</li>
-            ) : (
-              memory.items.map((item: MemoryItem, i: number) => (
-                <li
-                  key={`${item.content}-${i}`}
-                  className={
-                    item.importance === "high"
-                      ? "border-l-2 border-amber-500 pl-2"
-                      : "border-l-2 border-zinc-300 pl-2 dark:border-zinc-600"
-                  }
-                >
-                  <span className="mr-2 font-mono text-[10px] uppercase text-zinc-500">
-                    {item.importance}
+              <form
+                onSubmit={handleSubmit}
+                className="shrink-0 border-t border-zinc-200/70 bg-zinc-50/50 p-3 dark:border-zinc-800/80 dark:bg-zinc-900/50 sm:p-4"
+              >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <textarea
+                    className="min-h-[48px] flex-1 resize-y rounded-xl border-0 bg-white px-4 py-3 text-[15px] leading-relaxed text-zinc-900 ring-1 ring-zinc-200/90 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-violet-500/35 dark:bg-zinc-800/90 dark:text-zinc-100 dark:ring-zinc-700 dark:placeholder:text-zinc-500 dark:focus:ring-violet-400/30"
+                    rows={2}
+                    value={input}
+                    onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSend();
+                      }
+                    }}
+                    disabled={loading}
+                    placeholder="输入消息，Enter 发送 · Shift+Enter 换行"
+                    maxLength={2000}
+                  />
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="inline-flex h-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-6 text-sm font-semibold text-white shadow-lg shadow-violet-600/25 transition hover:from-violet-500 hover:to-indigo-500 disabled:cursor-not-allowed disabled:opacity-45 sm:h-auto sm:min-h-[48px] sm:self-stretch"
+                  >
+                    {loading ? "处理中" : "发送"}
+                  </button>
+                </div>
+                <p className="mt-2 text-center text-[11px] text-zinc-400 dark:text-zinc-500 sm:text-left">
+                  {input.length}/2000
+                </p>
+              </form>
+            </section>
+
+            {/* Memory 侧栏 */}
+            <aside className="flex min-h-[260px] w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-zinc-200/80 bg-white/70 shadow-lg shadow-zinc-900/5 ring-1 ring-white/50 backdrop-blur-md dark:border-zinc-800/90 dark:bg-zinc-900/65 dark:shadow-black/30 dark:ring-zinc-700/40 lg:h-[calc(100dvh-11rem)] lg:w-[300px] xl:w-[320px]">
+              <div className="border-b border-zinc-200/70 px-4 py-4 dark:border-zinc-800/80">
+                <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">长期记忆</h2>
+                <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                  服务端返回的 Memory，便于观察路由与压缩效果。
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className="rounded-lg bg-zinc-100 px-2 py-1 font-mono text-[11px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                    short {memory.shortTerm.length}
                   </span>
-                  {item.content}
-                </li>
-              ))
-            )}
-          </ul>
-        </aside>
+                  <span className="rounded-lg bg-zinc-100 px-2 py-1 font-mono text-[11px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                    items {memory.items.length}
+                  </span>
+                </div>
+              </div>
+              <ul className="flex-1 min-h-0 space-y-2 overflow-y-auto px-3 py-3">
+                {memory.items.length === 0 ? (
+                  <li className="rounded-xl border border-dashed border-zinc-200 px-3 py-8 text-center text-xs text-zinc-400 dark:border-zinc-700 dark:text-zinc-500">
+                    暂无条目；多聊几句或触发总结后会出现。
+                  </li>
+                ) : (
+                  memory.items.map((item: MemoryItem, i: number) => (
+                    <li
+                      key={`${item.content}-${i}`}
+                      className={`rounded-xl px-3 py-2.5 text-xs leading-relaxed ${
+                        item.importance === "high"
+                          ? "border border-amber-200/80 bg-amber-50/90 text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-50"
+                          : "border border-zinc-200/70 bg-zinc-50/90 text-zinc-800 dark:border-zinc-700 dark:bg-zinc-800/40 dark:text-zinc-200"
+                      }`}
+                    >
+                      <span
+                        className={`mb-1 inline-block rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide ${
+                          item.importance === "high"
+                            ? "bg-amber-500/20 text-amber-900 dark:text-amber-200"
+                            : "bg-zinc-200/80 text-zinc-600 dark:bg-zinc-600/50 dark:text-zinc-300"
+                        }`}
+                      >
+                        {item.importance}
+                      </span>
+                      <p className="mt-1">{item.content}</p>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </aside>
+          </div>
+        </div>
       </div>
     </main>
   );

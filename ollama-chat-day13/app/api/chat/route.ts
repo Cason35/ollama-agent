@@ -3,12 +3,14 @@
  *
  * 整体流程：
  * 1. 解析请求中的 messages 与可选 memory，调用 buildMemory 组装「短期窗口 + 长期条目」并生成喂给模型的 messages；
- * 2. 用专用 system 提示词走一轮 Ollama，让模型输出 JSON 形式的 action（路由）；
+ * 2. 用专用 system 提示词走一轮聊天模型（本地 Ollama 或小米 MiMo OpenAI 兼容接口），让模型输出 JSON 形式的 action（路由）；
  * 3. 结合「延续上一轮」等启发规则修正 action，再分支执行：天气 / 总结 / 待办 / 普通回复；
  * 4. 响应体始终带上最新的 memory，供前端下一轮原样回传，形成闭环。
  *
- * 外部依赖：本地 Ollama HTTP API；天气分支使用 Open-Meteo（无需 key）。
+ * 外部依赖：本地 Ollama HTTP API，或小米 MiMo（`XIAOMI_MIMO_*` 环境变量）；天气分支使用 Open-Meteo（无需 key）。
  */
+
+import { MIMO_MODEL_IDS, type MimoModelId } from "@/lib/mimo-models";
 
 /** 与前端约定的单条对话消息（仅 user / assistant 文本）。 */
 type ChatMessage = {
@@ -59,22 +61,22 @@ type WorkflowStepAction = "chat" | "summary" | "todo" | "weather";
 
 /** 工作流中的单步：含状态、输出与可观测耗时。 */
 type WorkflowStep = {
-  id: string;
-  name: string;
-  action: WorkflowStepAction;
-  input: string;
-  status: "pending" | "running" | "success" | "failed";
-  output?: unknown;
-  error?: string;
-  durationMs?: number;
+  id: string; // 步骤唯一 id（前端列表 key、日志关联）
+  name: string; // 人类可读的步骤标题
+  action: WorkflowStepAction; // 本步要调用的工具类型
+  input: string; // 传给该工具的自然语言或关键词入参
+  status: "pending" | "running" | "success" | "failed"; // 步骤生命周期状态
+  output?: unknown; // 成功时工具返回（字符串或 JSON 可序列化结构）
+  error?: string; // 失败时的错误信息摘要
+  durationMs?: number; // 本步执行耗时（毫秒）
 };
 
 /** 一次多步骤任务的容器。 */
 type Workflow = {
-  id: string;
-  goal: string;
-  steps: WorkflowStep[];
-  status: "pending" | "running" | "success" | "failed";
+  id: string; // 工作流实例 id
+  goal: string; // 用户本轮目标（通常取最新 user 文本）
+  steps: WorkflowStep[]; // Planner 产出并由执行器顺序跑完的步骤列表
+  status: "pending" | "running" | "success" | "failed"; // 整体工作流状态
 };
 
 type ChatResponseBody =
@@ -113,10 +115,118 @@ const SECONDARY_COMPRESS_THRESHOLD_CHARS = 500; // 触发二次压缩的字符�
 /** 二次压缩后最多保留的条目数。 */
 const MAX_COMPRESSED_ITEMS = 5; // 压缩输出条数上限
 
-// ---------- Ollama ----------
+// ---------- 模型后端：本地 Ollama / 小米 MiMo（OpenAI 兼容）----------
 
-const OLLAMA_API_URL = "http://localhost:11434/api/chat"; // 本地 Ollama 聊天端点
-const OLLAMA_MODEL = "qwen2.5:14b"; // 默认模型名
+const DEFAULT_OLLAMA_API_URL = "http://localhost:11434/api/chat"; // 默认 Ollama 聊天端点
+const DEFAULT_OLLAMA_MODEL = "qwen2.5:14b"; // 默认本地模型名
+/** 小米 MiMo OpenAI 兼容网关默认 origin（勿带末尾斜杠以外的多余路径，拼接 /chat/completions）。 */
+const DEFAULT_MIMO_BASE_URL = "https://token-plan-cn.xiaomimimo.com/v1";
+
+/** 请求体选的提供商：local=Ollama，mimo=小米兼容接口。 */
+type ModelProvider = "local" | "mimo";
+
+/**
+ * 单次请求内的模型运行时配置（由 env + 前端 provider / mimoModel 组装）。
+ * Key 仅来自服务端环境变量，绝不从前端传入。
+ */
+type ModelRuntime = {
+  provider: ModelProvider; // 当前走 Ollama 还是 MiMo
+  ollamaUrl: string; // 本地聊天 API 完整 URL
+  ollamaModel: string; // 本地模型名
+  mimoBaseUrl: string; // 小米网关 origin（不带路径尾巴）
+  mimoApiKey: string; // 小米 Bearer 密钥
+  mimoModel: string; // 小米模型 id
+};
+
+function isMimoModelId(id: string): id is MimoModelId {
+  return (MIMO_MODEL_IDS as readonly string[]).includes(id); // 判断 id 是否在白名单模型列表中
+}
+
+function normalizeApiBase(url: string): string {
+  return url.replace(/\/+$/, ""); // 去掉末尾多余斜杠，便于拼接 /chat/completions
+}
+
+/**
+ * 统一聊天补全：Ollama `/api/chat` 或 OpenAI 兼容 `POST /chat/completions`。
+ * 成功时 text 为助手正文；失败时 text 尽量携带上游错误文案。
+ */
+async function invokeChatModel(
+  rt: ModelRuntime,
+  messages: Array<{ role: string; content: string }>
+): Promise<{ ok: boolean; status: number; text: string }> {
+  if (rt.provider === "local") {
+    const res = await fetch(rt.ollamaUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: rt.ollamaModel,
+        messages,
+        stream: false,
+      }),
+    });
+    const rawText = await res.text();
+    let text = "";
+    if (res.ok) {
+      try {
+        const data = JSON.parse(rawText) as { message?: { content?: string } };
+        text = data.message?.content?.trim() || "";
+      } catch {
+        text = "";
+      }
+    } else {
+      try {
+        const data = JSON.parse(rawText) as { error?: string };
+        text = (typeof data.error === "string" ? data.error : "") || rawText.slice(0, 800);
+      } catch {
+        text = rawText.slice(0, 800);
+      }
+    }
+    return { ok: res.ok, status: res.status, text };
+  }
+
+  const base = normalizeApiBase(rt.mimoBaseUrl); // 规范化小米网关基址
+  const res = await fetch(`${base}/chat/completions`, {
+    // OpenAI 兼容聊天补全端点
+    method: "POST", // POST JSON
+    headers: {
+      "Content-Type": "application/json", // 声明 JSON 请求体
+      Authorization: `Bearer ${rt.mimoApiKey}`, // Bearer 鉴权头
+    },
+    body: JSON.stringify({
+      model: rt.mimoModel, // 前端选择的具体 MiMo 模型 id
+      messages, // 与 Ollama 侧相同的消息数组
+      stream: false, // 本接口走非流式一次性返回
+    }),
+  });
+  const rawText = await res.text(); // 原始响应文本（成功/失败统一先读字符串）
+  let text = ""; // 解析出的助手正文或错误摘要
+  if (res.ok) {
+    try {
+      const data = JSON.parse(rawText) as {
+        choices?: Array<{ message?: { content?: string } }>; // OpenAI 风格 choices
+      };
+      text = data.choices?.[0]?.message?.content?.trim() || ""; // 取首条 choice 的 message.content
+    } catch {
+      text = ""; // JSON 异常则视为无正文
+    }
+  } else {
+    try {
+      const data = JSON.parse(rawText) as {
+        error?: { message?: string } | string; // 兼容对象或字符串 error
+      };
+      if (typeof data.error === "object" && data.error?.message) {
+        text = data.error.message; // 读出 OpenAI 式 error.message
+      } else if (typeof data.error === "string") {
+        text = data.error; // 简单字符串错误
+      } else {
+        text = rawText.slice(0, 800); // 无法结构化则截取原始片段避免日志爆炸
+      }
+    } catch {
+      text = rawText.slice(0, 800); // 解析失败同样截取正文
+    }
+  }
+  return { ok: res.ok, status: res.status, text }; // 与 local 分支统一返回形状
+}
 
 // ---------- 规则抽取 / 重要性推断用的正则 ----------
 
@@ -144,20 +254,7 @@ function logWorkflow(
   event: "start" | "step" | "done" | "error",
   payload: Record<string, unknown>
 ) {
-  console.log(`[Workflow] ${event}`, payload);
-}
-
-/** 调用本地 Ollama /api/chat，非流式，返回完整 message.content。 */
-async function callOllama(messages: Array<{ role: string; content: string }>) {
-  return fetch(OLLAMA_API_URL, {
-    method: "POST", // POST
-    headers: { "Content-Type": "application/json" }, // JSON 请求头
-    body: JSON.stringify({
-      model: OLLAMA_MODEL, // 模型
-      messages, // 消息数组
-      stream: false, // 非流式
-    }), // body
-  }); // fetch
+  console.log(`[Workflow] ${event}`, payload); // 打印工作流阶段与结构化负载
 }
 
 /** 将模型输出的 action 字符串收敛到本服务支持的四种之一（含 search→weather 别名）。 */
@@ -170,10 +267,10 @@ function normalizeAction(raw: unknown): Action {
 
 /** Planner 输出的 action 仅含四类工具，不含 workflow。 */
 function normalizeWorkflowAction(raw: unknown): WorkflowStepAction {
-  if (raw === "weather" || raw === "search") return "weather";
-  if (raw === "summary") return "summary";
-  if (raw === "todo") return "todo";
-  return "chat";
+  if (raw === "weather" || raw === "search") return "weather"; // 天气与 search 别名统一为 weather
+  if (raw === "summary") return "summary"; // 总结步骤
+  if (raw === "todo") return "todo"; // 待办生成步骤
+  return "chat"; // 默认走普通对话
 }
 
 /**
@@ -315,15 +412,15 @@ function formatMemoryBlock(items: MemoryItem[], importance?: MemoryImportance): 
 
 /** 为 Planner 注入长期记忆（用 items 替代文档中的 longTerm 字段）。 */
 function formatMemoryForPlanner(memory: Memory): string {
-  const highBlock = formatMemoryBlock(memory.items, "high");
-  const lowBlock = formatMemoryBlock(memory.items, "low");
-  if (!highBlock && !lowBlock) return "(空)";
+  const highBlock = formatMemoryBlock(memory.items, "high"); // 高优先级记忆块（身份/目标等）
+  const lowBlock = formatMemoryBlock(memory.items, "low"); // 低优先级记忆块
+  if (!highBlock && !lowBlock) return "(空)"; // 无任何长期记忆时返回占位说明
   return [
-    highBlock ? `【高优先级记忆】\n${highBlock}` : "",
-    lowBlock ? `【其他记忆】\n${lowBlock}` : "",
+    highBlock ? `【高优先级记忆】\n${highBlock}` : "", // 有则注入高优区块
+    lowBlock ? `【其他记忆】\n${lowBlock}` : "", // 有则注入其他区块
   ]
-    .filter(Boolean)
-    .join("\n\n");
+    .filter(Boolean) // 去掉空串避免多余换行
+    .join("\n\n"); // 两段之间空一行拼接
 }
 
 /**
@@ -390,7 +487,10 @@ function resolveContinuationAction(latestUser: string, parsed: ParsedOutput, mem
  * 长期记忆过多时，用单独一轮模型调用把多条事实压缩成少量核心条目（仍带 importance）。
  * 请求失败则退化为去重 + trim 后截断。
  */
-async function secondaryCompressItems(items: MemoryItem[]): Promise<MemoryItem[]> {
+async function secondaryCompressItems(
+  items: MemoryItem[],
+  rt: ModelRuntime
+): Promise<MemoryItem[]> {
   if (items.length === 0) return items; // 空则直接返回
   const existingHigh = formatMemoryBlock(items, "high"); // 原文高优先级块供模型保留语义
   const prompt = `
@@ -408,10 +508,8 @@ ${existingHigh || "(无)"}
 全部记忆条目：
 ${items.map((i) => `- ${i.content} [${i.importance}]`).join("\n")}
 `; // 压缩提示词
-  const res = await callOllama([{ role: "user", content: prompt }]); // 调用模型压缩
-  if (!res.ok) return trimMemoryItems(dedupeMemoryItems(items)).slice(0, MAX_COMPRESSED_ITEMS); // 失败则退化截断
-  const data = (await res.json()) as { message?: { content?: string } }; // 解析响应
-  const raw = data.message?.content?.trim() || ""; // 模型输出字符串
+  const { ok, text: raw } = await invokeChatModel(rt, [{ role: "user", content: prompt }]); // 调用模型压缩
+  if (!ok) return trimMemoryItems(dedupeMemoryItems(items)).slice(0, MAX_COMPRESSED_ITEMS); // 失败则退化截断
   try {
     const parsed = JSON.parse(raw.match(/\[[\s\S]*\]/)?.[0] || raw) as unknown; // 抽取数组 JSON
     if (!Array.isArray(parsed)) throw new Error("invalid"); // 非数组则失败
@@ -435,11 +533,14 @@ ${items.map((i) => `- ${i.content} [${i.importance}]`).join("\n")}
 }
 
 /** 根据体积阈值决定是否触发 secondaryCompressItems，并最终 trim。 */
-async function maybeEvolveMemoryItems(items: MemoryItem[]): Promise<MemoryItem[]> {
+async function maybeEvolveMemoryItems(
+  items: MemoryItem[],
+  rt: ModelRuntime
+): Promise<MemoryItem[]> {
   let next = dedupeMemoryItems(items); // 先去重
   const charLen = memoryItemsCharLength(next); // 当前字符总长
   if (charLen >= SECONDARY_COMPRESS_THRESHOLD_CHARS || next.length > 12) {
-    next = await secondaryCompressItems(next); // 超阈则二次压缩
+    next = await secondaryCompressItems(next, rt); // 超阈则二次压缩
   }
   return trimMemoryItems(next); // 最后裁剪体积
 }
@@ -450,7 +551,8 @@ async function maybeEvolveMemoryItems(items: MemoryItem[]): Promise<MemoryItem[]
  */
 async function summarizeForMemory(
   oldMessages: ChatMessage[],
-  existingItems: MemoryItem[]
+  existingItems: MemoryItem[],
+  rt: ModelRuntime
 ): Promise<MemoryItem[]> {
   const dialogue = oldMessages
     .map((m) => `${m.role === "user" ? "用户" : "助手"}: ${m.content}`) // 格式化每轮
@@ -475,10 +577,8 @@ ${existingText || "(空)"}
 ${dialogue}
 `; // 压缩旧对话的提示词
 
-  const res = await callOllama([{ role: "user", content: prompt }]); // 请求模型输出 JSON 数组
-  if (!res.ok) return []; // 失败返回空，由上层忽略
-  const data = (await res.json()) as { message?: { content?: string } }; // 解析 Ollama JSON
-  const raw = data.message?.content?.trim() || ""; // 模型原始文本
+  const { ok, text: raw } = await invokeChatModel(rt, [{ role: "user", content: prompt }]); // 请求模型输出 JSON 数组
+  if (!ok) return []; // 失败返回空，由上层忽略
   try {
     const parsed = JSON.parse(raw.match(/\[[\s\S]*\]/)?.[0] || raw) as unknown; // 尝试解析数组
     if (!Array.isArray(parsed)) return []; // 非数组则空
@@ -518,7 +618,8 @@ function extractRuleBasedMemory(messages: ChatMessage[]): MemoryItem[] {
  */
 async function buildMemory(
   incomingMessages: ChatMessage[],
-  incomingMemory?: IncomingMemoryPayload
+  incomingMemory: IncomingMemoryPayload | undefined,
+  rt: ModelRuntime
 ): Promise<{ memory: Memory; modelMessages: Array<{ role: string; content: string }> }> {
   let items = normalizeIncomingMemoryPayload(incomingMemory); // 解析入参记忆
 
@@ -527,12 +628,12 @@ async function buildMemory(
   const oldMessages = shouldSummarize ? incomingMessages.slice(0, -SHORT_TERM_SIZE) : []; // 旧段待总结
 
   if (oldMessages.length > 0) {
-    const summarized = await summarizeForMemory(oldMessages, items); // 异步总结旧消息为条目
+    const summarized = await summarizeForMemory(oldMessages, items, rt); // 异步总结旧消息为条目
     items = appendMemoryItems(items, summarized); // 合并进长期
   }
 
   items = appendMemoryItems(items, extractRuleBasedMemory(incomingMessages)); // 合并规则抽取
-  items = await maybeEvolveMemoryItems(items); // 可能二次压缩并裁剪
+  items = await maybeEvolveMemoryItems(items, rt); // 可能二次压缩并裁剪
 
   const memory: Memory = { shortTerm, items }; // 组装 Memory
 
@@ -584,20 +685,18 @@ function getLatestUserText(messages: ChatMessage[]): string {
  * 当路由把 action 判为 chat 但 content 为空时，用完整 modelMessages 再走一轮普通对话。
  */
 async function generateFallbackChat(
-  messages: Array<{ role: string; content: string }>
+  messages: Array<{ role: string; content: string }>,
+  rt: ModelRuntime
 ): Promise<string> {
-  const fallbackRes = await callOllama([
+  const { ok, text } = await invokeChatModel(rt, [
     {
       role: "system", // 第二轮聊天人设
       content: "你是一个简洁、友好的中文助手。请直接回答用户，不要输出 JSON。", // 禁止 JSON
     },
     ...messages, // 带上完整上下文（含 system 记忆块）
-  ]); // 调用 Ollama
-  if (!fallbackRes.ok) return "抱歉，我现在暂时无法正常回答，请稍后再试。"; // HTTP 失败
-  const fallbackData = (await fallbackRes.json()) as { message?: { content?: string } }; // 解析
-  return (
-    fallbackData.message?.content?.trim() || "抱歉，我现在暂时无法正常回答，请稍后再试。" // 空内容兜底
-  ); // 返回字符串
+  ]); // 调用模型
+  if (!ok) return "抱歉，我现在暂时无法正常回答，请稍后再试。"; // HTTP 失败
+  return text || "抱歉，我现在暂时无法正常回答，请稍后再试。"; // 空内容兜底
 }
 
 /** 总结工具：取最近若干轮对话拼成文本；若无则退回路由给出的 fallback。 */
@@ -614,11 +713,12 @@ async function summarizeWithModel(
   messages: ChatMessage[],
   fallbackText: string,
   memory: Memory,
+  rt: ModelRuntime,
   chainPrefix?: string
 ) {
   let content = pickSummaryContext(messages, fallbackText); // 选定总结输入
   if (chainPrefix) {
-    content = `${chainPrefix}\n\n${content}`;
+    content = `${chainPrefix}\n\n${content}`; // 工作流场景：把前置步骤输出拼在对话上下文前
   }
   const memHint = formatMemoryBlock(memory.items, "high"); // 高优先级记忆提示
   const prompt = `
@@ -633,12 +733,10 @@ ${memHint || "(无)"}
 对话：
 ${content}
 `; // 总结提示词
-  const res = await callOllama([{ role: "user", content: prompt }]); // 调用模型
-  if (!res.ok) {
+  const { ok, text } = await invokeChatModel(rt, [{ role: "user", content: prompt }]); // 调用模型
+  if (!ok) {
     return "总结失败：模型暂时不可用，请稍后重试。"; // 模型不可用
   }
-  const data = (await res.json()) as { message?: { content?: string } }; // 解析响应
-  const text = data.message?.content?.trim(); // 正文
   return text || "总结失败：未获取到有效结果。"; // 空正文兜底
 }
 
@@ -672,9 +770,10 @@ function parseTodoItemsFromText(raw: string): TodoItem[] | null {
 async function generateTodosWithModel(args: {
   userInput: string;
   memory: Memory;
+  rt: ModelRuntime;
   chainPrefix?: string;
 }): Promise<TodoItem[]> {
-  const { userInput, memory, chainPrefix } = args; // 解构参数
+  const { userInput, memory, chainPrefix, rt } = args; // 解构参数
   const highBlock = formatMemoryBlock(memory.items, "high"); // 高优先级记忆块
   const lowBlock = formatMemoryBlock(memory.items, "low"); // 其他记忆块
 
@@ -695,17 +794,15 @@ ${lowBlock || "(空)"}
 ${chainPrefix ? `\n【前置步骤输出】\n${chainPrefix}\n` : ""}
 用户输入：
 ${userInput}
-`; // 待办生成提示词
-  const res = await callOllama([{ role: "user", content: prompt }]); // 请求模型
-  if (!res.ok) {
+`; // 待办生成提示词；若有 chainPrefix 则上文已附带「前置步骤输出」段落供串联
+  const { ok, text: raw } = await invokeChatModel(rt, [{ role: "user", content: prompt }]); // 请求模型
+  if (!ok) {
     return [
       { task: "对照记忆澄清本周目标与交付物", done: false }, // 占位 1
       { task: "拆解关键任务并设定验收标准", done: false }, // 占位 2
       { task: "执行并复盘，更新进度", done: false }, // 占位 3
     ]; // 失败静态列表
   }
-  const data = (await res.json()) as { message?: { content?: string } }; // 解析响应
-  const raw = data.message?.content?.trim() || ""; // 模型输出
   const fromDirect = parseTodoItemsFromText(raw); // 整体 JSON 解析
   if (fromDirect) return fromDirect; // 成功则返回
 
@@ -721,26 +818,31 @@ ${userInput}
 }
 
 /** Planner 输出的单步草案（无 id/status，由执行器补全）。 */
-type PlannerPlanItem = { name: string; action: WorkflowStepAction; input: string };
+type PlannerPlanItem = {
+  name: string; // 步骤展示名
+  action: WorkflowStepAction; // 工具枚举
+  input: string; // 送入工具的字符串（已由 normalizePlannerStepInput 规范）
+};
 
 /**
  * Planner 有时会把 input 写成对象（如 { city: "北京" }）；直接 String(obj) 会得到 "[object Object]"。
  * 这里优先抽取常见字段，否则 JSON 序列化，保证下游天气解析与前端展示可读。
  */
 function normalizePlannerStepInput(raw: unknown): string {
-  if (raw == null) return "";
-  if (typeof raw === "string") return raw.trim();
-  if (typeof raw === "number" || typeof raw === "boolean") return String(raw);
+  if (raw == null) return ""; // null/undefined 视为无输入
+  if (typeof raw === "string") return raw.trim(); // 字符串直接裁剪空白
+  if (typeof raw === "number" || typeof raw === "boolean") return String(raw); // 标量转成可读字符串
   if (Array.isArray(raw)) {
     try {
-      return JSON.stringify(raw);
+      return JSON.stringify(raw); // 数组整体 JSON 化，避免 [object Object]
     } catch {
-      return "";
+      return ""; // 序列化失败则空串
     }
   }
   if (typeof raw === "object") {
-    const o = raw as Record<string, unknown>;
+    const o = raw as Record<string, unknown>; // 断言为字典便于按键取值
     const preferKeys = [
+      // 常见「自然语言入口」字段名，优先抽到可展示/可传给工具的字符串
       "city",
       "location",
       "place",
@@ -753,26 +855,26 @@ function normalizePlannerStepInput(raw: unknown): string {
       "description",
     ];
     for (const key of preferKeys) {
-      const v = o[key];
-      if (typeof v === "string" && v.trim()) return v.trim();
+      const v = o[key]; // 读取候选键对应的值
+      if (typeof v === "string" && v.trim()) return v.trim(); // 首个非空字符串即作为步骤 input
     }
     try {
-      return JSON.stringify(o);
+      return JSON.stringify(o); // 无常见键则整体 JSON（仍优于 [object Object]）
     } catch {
-      return "";
+      return ""; // stringify 异常则退回空
     }
   }
-  return String(raw).trim();
+  return String(raw).trim(); // 其余类型统一 toString 再 trim
 }
 
 /** 解析 Planner 返回的 JSON 数组（允许多级容错）。 */
 function parsePlannerPlanOutput(modelOutput: string): PlannerPlanItem[] {
   try {
-    const parsed = JSON.parse(modelOutput) as unknown;
+    const parsed = JSON.parse(modelOutput) as unknown; // 尝试整段解析为 JSON
     if (!Array.isArray(parsed)) return []; // 非数组失败
-    const out: PlannerPlanItem[] = [];
+    const out: PlannerPlanItem[] = []; // 累积合法步骤
     for (const row of parsed) {
-      if (!row || typeof row !== "object") continue;
+      if (!row || typeof row !== "object") continue; // 跳过非法元素
       const name = String((row as { name?: unknown }).name || "").trim() || "步骤"; // 步骤名
       const input = normalizePlannerStepInput((row as { input?: unknown }).input); // 步骤输入（兼容对象）
       const action = normalizeWorkflowAction((row as { action?: unknown }).action); // 动作
@@ -789,8 +891,12 @@ function parsePlannerPlanOutput(modelOutput: string): PlannerPlanItem[] {
 }
 
 /** Workflow Planner：把用户复杂需求拆成 1-4 个可执行步骤。 */
-async function planWorkflowSteps(userInput: string, memory: Memory): Promise<PlannerPlanItem[]> {
-  const memText = formatMemoryForPlanner(memory); // 长期记忆文本
+async function planWorkflowSteps(
+  userInput: string,
+  memory: Memory,
+  rt: ModelRuntime
+): Promise<PlannerPlanItem[]> {
+  const memText = formatMemoryForPlanner(memory); // 长期记忆文本（供 Planner 结合语境拆步）
   const plannerPrompt = `
 你是一个 Workflow Planner。
 
@@ -812,53 +918,56 @@ ${userInput}
 
 长期记忆：
 ${memText}
-`.trim();
+`.trim(); // 去掉提示词首尾空白，减少模型多余输出
 
-  const res = await callOllama([{ role: "user", content: plannerPrompt }]); // 规划调用
-  if (!res.ok) {
-    return [{ name: "理解与回应", action: "chat", input: userInput }]; // 降级单步
+  const { ok, text: raw } = await invokeChatModel(rt, [{ role: "user", content: plannerPrompt }]); // 调用模型生成步骤 JSON
+  if (!ok) {
+    return [{ name: "理解与回应", action: "chat", input: userInput }]; // 模型不可用：单步 chat 兜底
   }
-  const data = (await res.json()) as { message?: { content?: string } }; // 解析响应
-  const raw = (data.message?.content || "").trim(); // 模型正文
-  const steps = parsePlannerPlanOutput(raw); // 解析步骤
+  const trimmedRaw = raw.trim(); // 去掉模型输出首尾空白
+  const steps = parsePlannerPlanOutput(trimmedRaw); // 解析为 PlannerPlanItem 列表
   if (steps.length === 0) {
-    return [{ name: "理解与回应", action: "chat", input: userInput }]; // 解析失败兜底
+    return [{ name: "理解与回应", action: "chat", input: userInput }]; // 解析不到步骤则同样单步兜底
   }
-  return steps; // 正常规划
+  return steps; // 返回规划结果供执行器消费
 }
 
 /** workflow 中的 chat 步骤：可串联前置步骤文本。 */
 async function runWorkflowChat(
   stepInput: string,
   chainPrefix: string | undefined,
-  memory: Memory
+  memory: Memory,
+  rt: ModelRuntime
 ): Promise<string> {
   const userContent = [chainPrefix ? `前置步骤输出：\n${chainPrefix}` : "", `当前任务：\n${stepInput}`]
-    .filter(Boolean)
-    .join("\n\n"); // 用户载荷
-  const memText = formatMemoryForPlanner(memory); // 记忆参考
-  const res = await callOllama([
+    .filter(Boolean) // 无前缀时只保留「当前任务」段
+    .join("\n\n"); // 拼接成单条 user 消息正文
+  const memText = formatMemoryForPlanner(memory); // 记忆参考（注入 system）
+  const { ok, text } = await invokeChatModel(rt, [
     {
-      role: "system",
-      content: `你是简洁的中文助手。结合用户长期记忆完成任务，不要输出 JSON。\n\n长期记忆：\n${memText}`,
+      role: "system", // 系统人设 + 长期记忆约束
+      content: `你是简洁的中文助手。结合用户长期记忆完成任务，不要输出 JSON。\n\n长期记忆：\n${memText}`, // 禁止 JSON，附带记忆块
     },
-    { role: "user", content: userContent },
-  ]); // 单轮调用
-  if (!res.ok) return "该步骤失败：模型暂不可用。";
-  const data = (await res.json()) as { message?: { content?: string } }; // 解析正文
-  return data.message?.content?.trim() || "（无输出）";
+    { role: "user", content: userContent }, // 用户侧：前置输出 + 本步任务描述
+  ]); // 单轮补全完成该 chat 步骤
+  if (!ok) return "该步骤失败：模型暂不可用。"; // HTTP/业务失败时的固定中文提示
+  return text || "（无输出）"; // 成功但空正文则占位
 }
 
 /** 汇总各步成功结果，生成面向用户的最终答复。 */
-async function summarizeWorkflowResult(goal: string, workflow: Workflow): Promise<string> {
+async function summarizeWorkflowResult(
+  goal: string,
+  workflow: Workflow,
+  rt: ModelRuntime
+): Promise<string> {
   const lines = workflow.steps
-    .filter((s) => s.status === "success")
+    .filter((s) => s.status === "success") // 只汇总成功的步骤，忽略失败或未跑到的
     .map((s) => {
       const out =
         typeof s.output === "string" ? s.output : JSON.stringify(s.output ?? ""); // 序列化输出
-      return `【${s.name}】\n${out}`; // 步骤块
+      return `【${s.name}】\n${out}`; // 步骤标题 + 该步正文
     })
-    .join("\n\n"); // 拼接
+    .join("\n\n"); // 多块之间空一行
 
   const prompt = `
 你是汇总助手。用户目标：
@@ -868,93 +977,103 @@ ${goal}
 ${lines || "(无成功步骤)"}
 
 请用简洁中文给出一段最终答复（含结论与可执行建议），不要输出 JSON。
-`.trim();
+`.trim(); // trim 汇总提示词
 
-  const res = await callOllama([{ role: "user", content: prompt }]); // 汇总调用
-  if (!res.ok) {
-    return lines || "工作流已完成。"; // 失败则用步骤拼接文本
+  const { ok, text } = await invokeChatModel(rt, [{ role: "user", content: prompt }]); // 让模型产出面向用户的整合答复
+  if (!ok) {
+    return lines || "工作流已完成。"; // 模型不可用时退回步骤拼接或固定句
   }
-  const data = (await res.json()) as { message?: { content?: string } }; // 正文
-  return data.message?.content?.trim() || lines || "工作流已完成。";
+  return text || lines || "工作流已完成。"; // 优先模型汇总，否则步骤拼接，再否则固定句
 }
 
 /**
  * 顺序执行 workflow.steps，复用 summary / todo / weather / chat 工具；
  * 失败则中断并标记 workflow.status = failed。
  */
-async function executeWorkflow(workflow: Workflow, memory: Memory): Promise<Workflow> {
-  let priorOutputText = ""; // 前置步骤串联文本
+async function executeWorkflow(
+  workflow: Workflow,
+  memory: Memory,
+  rt: ModelRuntime
+): Promise<Workflow> {
+  let priorOutputText = ""; // 前置步骤串联文本（供 summary/todo/chat 等后续步引用）
 
   for (const step of workflow.steps) {
-    const stepStart = Date.now(); // 单步计时起点
-    step.status = "running";
+    const stepStart = Date.now(); // 单步计时起点（计算 durationMs）
+    step.status = "running"; // 进入执行中状态
 
     logWorkflow("step", {
-      goal: workflow.goal,
-      step: step.name,
-      action: step.action,
-      status: step.status,
-    });
+      goal: workflow.goal, // 工作流目标上下文
+      step: step.name, // 当前步骤名
+      action: step.action, // 当前工具类型
+      status: step.status, // 应为 running
+    }); // 步骤开始日志
 
     try {
-      let out: unknown;
+      let out: unknown; // 本步工具产出的原始结果
       if (step.action === "summary") {
-        out = await summarizeWithModel(memory.shortTerm, step.input, memory, priorOutputText || undefined); // 总结
+        out = await summarizeWithModel(
+          memory.shortTerm, // 用短期窗口作总结上下文
+          step.input, // Planner 给的总结焦点/兜底文本
+          memory, // 携带长期记忆条目
+          rt, // 模型运行时
+          priorOutputText || undefined // 把工作流前文拼进总结输入（若有）
+        ); // 调用总结分支
       } else if (step.action === "todo") {
         out = await generateTodosWithModel({
-          userInput: step.input,
-          memory,
-          chainPrefix: priorOutputText || undefined,
-        }); // 待办
+          userInput: step.input, // 本步的用户向任务描述
+          memory, // 长期记忆对齐身份与目标
+          rt, // 模型运行时
+          chainPrefix: priorOutputText || undefined, // 前置步骤输出并入待办提示
+        }); // 生成待办列表
       } else if (step.action === "weather") {
-        const latestUser = getLatestUserText(memory.shortTerm); // 最近用户话
+        const latestUser = getLatestUserText(memory.shortTerm); // 最近一条用户话（兜底城市线索）
         const stepText =
           step.input && step.input !== "[object Object]" ? step.input : ""; // 规避历史 String(object) 污染
         const keyword = extractWeatherCity(stepText || latestUser); // 城市解析（对象 input 已在上游规范化）
-        out = await realWeather(keyword); // 天气（声明在后，运行时已初始化）
+        out = await realWeather(keyword); // 走 Open-Meteo 返回可读天气文案
       } else {
-        out = await runWorkflowChat(step.input, priorOutputText || undefined, memory); // 聊天
+        out = await runWorkflowChat(step.input, priorOutputText || undefined, memory, rt); // 默认 chat 步骤
       }
 
-      step.output = out; // 记录输出
-      step.status = "success"; // 标记成功
-      step.durationMs = Date.now() - stepStart; // 耗时
+      step.output = out; // 写入本步结构化/文本输出
+      step.status = "success"; // 标记本步完成
+      step.durationMs = Date.now() - stepStart; // 记录本步 wall-clock 耗时
       priorOutputText = [priorOutputText, `[${step.name}]\n${typeof out === "string" ? out : JSON.stringify(out)}`]
-        .filter(Boolean)
-        .join("\n\n"); // 串联供后续步引用
+        .filter(Boolean) // 首步无前缀时不留空段
+        .join("\n\n"); // 多步结果用空行隔开，形成链式前缀
 
       console.log("[Workflow] output:", step.output); // 与文档示例对齐的原始输出日志
 
       logWorkflow("step", {
-        goal: workflow.goal,
-        step: step.name,
-        action: step.action,
-        status: step.status,
-        durationMs: step.durationMs,
-        output: step.output,
-      });
+        goal: workflow.goal, // 目标上下文
+        step: step.name, // 步骤名
+        action: step.action, // 工具类型
+        status: step.status, // 此时为 success
+        durationMs: step.durationMs, // 本步耗时
+        output: step.output, // 本步产出（日志可截断由控制台决定）
+      }); // 步骤成功收尾日志
     } catch (err) {
-      step.status = "failed"; // 标记失败
-      step.error = err instanceof Error ? err.message : String(err); // 错误信息
-      step.durationMs = Date.now() - stepStart; // 耗时
-      workflow.status = "failed"; // 整体失败
+      step.status = "failed"; // 本步标记失败
+      step.error = err instanceof Error ? err.message : String(err); // 统一收成字符串错误摘要
+      step.durationMs = Date.now() - stepStart; // 失败也记录已消耗时间
+      workflow.status = "failed"; // 整体流程进入失败（后续步不再执行）
 
       logWorkflow("error", {
-        goal: workflow.goal,
-        step: step.name,
-        action: step.action,
-        status: step.status,
-        error: step.error,
-        durationMs: step.durationMs,
-      });
-      break; // 中断后续步骤
+        goal: workflow.goal, // 目标上下文
+        step: step.name, // 失败发生在哪一步
+        action: step.action, // 哪类工具出错
+        status: step.status, // failed
+        error: step.error, // 错误文案
+        durationMs: step.durationMs, // 失败前耗时
+      }); // 错误日志
+      break; // 中断 for，不再执行后续步骤
     }
   }
 
   if (workflow.status !== "failed") {
-    workflow.status = "success"; // 全部成功
+    workflow.status = "success"; // 所有已执行步骤均未抛错则认为整体成功
   }
-  return workflow;
+  return workflow; // 返回可能被就地修改过的 workflow（含每步 status/output）
 }
 
 /**
@@ -964,16 +1083,58 @@ async function executeWorkflow(workflow: Workflow, memory: Memory): Promise<Work
 export async function POST(req: Request) {
   const requestStart = Date.now(); // 请求开始时间
   try {
-    const { messages, memory: incomingMemory, useWorkflow } = (await req.json()) as {
-      messages?: ChatMessage[]; // 可选消息数组
-      memory?: IncomingMemoryPayload; // 可选记忆负载（含兼容 longTerm）
-      useWorkflow?: boolean; // 是否走 Planner + Executor 多步工作流
-    }; // 解析 JSON body
+    const body = (await req.json()) as {
+      messages?: ChatMessage[]; // 对话历史（user/assistant 文本）
+      memory?: IncomingMemoryPayload; // 上轮回传的记忆载荷
+      useWorkflow?: boolean; // 是否走多步工作流而非单步路由
+      /** 前端：`local` | `mimo`，缺省为本地 Ollama */
+      provider?: string; // 模型提供商开关
+      /** 小米 MiMo 模型 id，仅在 provider=mimo 时生效 */
+      mimoModel?: string; // MiMo 具体模型 id
+    };
+    const { messages, memory: incomingMemory, useWorkflow, provider: providerRaw, mimoModel: mimoModelRaw } =
+      body; // 解构常用字段便于后续校验
     if (!Array.isArray(messages) || messages.length === 0) {
       return Response.json({ error: "messages is required" }, { status: 400 }); // 参数非法
     }
 
-    const { memory, modelMessages } = await buildMemory(messages, incomingMemory); // 构建记忆与模型上下文
+    const provider: ModelProvider = providerRaw === "mimo" ? "mimo" : "local"; // 仅在显式 mimo 时走云端，否则 Ollama
+    const mimoModel =
+      typeof mimoModelRaw === "string" && mimoModelRaw.trim()
+        ? mimoModelRaw.trim() // 使用前端传来的有效模型 id
+        : MIMO_MODEL_IDS[0]; // 缺省时取白名单首个默认模型
+
+    if (provider === "mimo") {
+      if (!isMimoModelId(mimoModel)) {
+        return Response.json(
+          {
+            error: `无效的 mimo 模型「${mimoModel}」。可选：${MIMO_MODEL_IDS.join("、")}`, // 明确列出可选模型
+          },
+          { status: 400 } // 客户端传参错误
+        );
+      }
+      const key = process.env.XIAOMI_MIMO_API_KEY?.trim(); // 服务端密钥，绝不来自前端
+      if (!key) {
+        return Response.json(
+          {
+            error:
+              "未配置环境变量 XIAOMI_MIMO_API_KEY：请在项目根目录复制 .env.example 为 .env.local 并填入密钥", // 引导本地配置
+          },
+          { status: 503 } // 服务未就绪
+        );
+      }
+    }
+
+    const rt: ModelRuntime = {
+      provider, // 当前请求选用的提供商
+      ollamaUrl: process.env.OLLAMA_API_URL?.trim() || DEFAULT_OLLAMA_API_URL, // Ollama 聊天 API 完整 URL
+      ollamaModel: process.env.OLLAMA_MODEL?.trim() || DEFAULT_OLLAMA_MODEL, // 本地默认模型名
+      mimoBaseUrl: process.env.XIAOMI_MIMO_BASE_URL?.trim() || DEFAULT_MIMO_BASE_URL, // 小米兼容网关 origin
+      mimoApiKey: process.env.XIAOMI_MIMO_API_KEY?.trim() || "", // 小米 API Key（local 时可为空）
+      mimoModel, // 当前 MiMo 模型（local 时亦携带但不使用）
+    };
+
+    const { memory, modelMessages } = await buildMemory(messages, incomingMemory, rt); // 构建记忆与模型上下文
 
     /** 统一把本轮计算好的 memory 附加到任意业务负载上返回前端。 */
     function withMemory(body: ChatResponsePayload): ChatResponseBody {
@@ -986,64 +1147,64 @@ export async function POST(req: Request) {
       console.log("[Workflow] start:", goal); // 文档要求：可见 workflow goal
       logWorkflow("start", { goal }); // 结构化开始日志
 
-      const planItems = await planWorkflowSteps(goal, memory); // Planner
+      const planItems = await planWorkflowSteps(goal, memory, rt); // Planner：模型产出步骤草案
       const wfId = globalThis.crypto.randomUUID(); // 工作流 id
       const workflow: Workflow = {
-        id: wfId,
-        goal,
-        status: "pending",
+        id: wfId, // 唯一标识本次多步任务
+        goal, // 用户目标描述
+        status: "pending", // 初始为待执行（随后会改为 running/success/failed）
         steps: planItems.map((p, i) => ({
-          id: `step-${i}-${globalThis.crypto.randomUUID()}`,
-          name: p.name,
-          action: p.action,
-          input: p.input,
-          status: "pending" as const,
+          id: `step-${i}-${globalThis.crypto.randomUUID()}`, // 每步稳定且唯一的 key
+          name: p.name, // 步骤标题
+          action: p.action, // 映射后的工具枚举
+          input: p.input, // 已规范化的字符串入参
+          status: "pending" as const, // 执行前均为 pending
         })),
       };
 
-      workflow.status = "running";
-      const wfDone = await executeWorkflow(workflow, memory); // Executor
+      workflow.status = "running"; // 开始顺序执行前先标为进行中
+      const wfDone = await executeWorkflow(workflow, memory, rt); // Executor：逐步跑工具并回填状态
       const wfElapsed = Date.now() - wfT0; // 总耗时
 
       logWorkflow("done", {
-        goal: wfDone.goal,
-        workflowId: wfDone.id,
-        status: wfDone.status,
-        durationMs: wfElapsed,
-        steps: wfDone.steps.map((s) => ({ name: s.name, action: s.action, ms: s.durationMs })),
-      });
+        goal: wfDone.goal, // 目标回顾
+        workflowId: wfDone.id, // 关联 id
+        status: wfDone.status, // 最终状态
+        durationMs: wfElapsed, // wall-clock 总耗时
+        steps: wfDone.steps.map((s) => ({ name: s.name, action: s.action, ms: s.durationMs })), // 每步摘要耗时
+      }); // 工作流收尾日志
 
       const failedStep = wfDone.steps.find((s) => s.status === "failed"); // 首个失败步
       const finalSummary =
         wfDone.status === "success"
-          ? await summarizeWorkflowResult(goal, wfDone) // 成功则模型汇总
-          : `工作流中断：${failedStep?.error || "未知错误"}`; // 失败则说明原因
+          ? await summarizeWorkflowResult(goal, wfDone, rt) // 成功则再调模型压缩成一段话
+          : `工作流中断：${failedStep?.error || "未知错误"}`; // 失败则用首错信息拼接说明
 
       logAgent("result", {
-        action: "workflow",
-        durationMs: wfElapsed,
-        success: wfDone.status === "success",
-      });
+        action: "workflow", // Agent 顶层动作为 workflow
+        durationMs: wfElapsed, // 与 done 日志一致的总耗时
+        success: wfDone.status === "success", // 是否完整跑通
+      }); // Agent 结果日志
 
-      return Response.json(withMemory({ type: "workflow", workflow: wfDone, finalSummary })); // 携带 workflow 的响应
+      return Response.json(withMemory({ type: "workflow", workflow: wfDone, finalSummary })); // JSON：含 workflow 详情、总结与 memory
     }
 
     // 路由阶段不附带 buildMemory 里为「最终聊天」准备的 system 记忆块，只喂路由 system + 近期 shortTerm，
     // 避免同一段长记忆在提示里出现两次、干扰 JSON 格式输出。
-    const routeRes = await callOllama([
+    const routeResult = await invokeChatModel(rt, [
       { role: "system", content: buildRoutingSystemPrompt(memory) }, // 路由专用 system（含记忆块）
       ...memory.shortTerm.map((m) => ({ role: m.role, content: m.content })), // 仅短期对话作为路由上下文
-    ]); // 路由 Ollama 调用
-    if (!routeRes.ok) {
-      const data = await routeRes.json().catch(() => ({})); // 读取错误体
+    ]); // 路由模型调用
+    if (!routeResult.ok) {
+      const errStatus =
+        routeResult.status >= 400 && routeResult.status < 600 ? routeResult.status : 502;
       return Response.json(
-        { error: (data as { error?: string }).error || "Ollama request failed" }, // 返回错误信息
-        { status: 500 } // 服务器错误
+        { error: routeResult.text || "模型请求失败" }, // 上游错误或网关错误
+        { status: errStatus }
       ); // Response
     }
 
-    const routeData = (await routeRes.json()) as { message?: { content?: string } }; // 路由响应
-    const modelOutput = (routeData.message?.content || "").trim(); // 路由模型输出文本
+    const modelOutput = routeResult.text.trim(); // 路由模型输出文本
     let parsed = parseModelOutput(modelOutput); // 解析 JSON 路由结果
     const latestUser = getLatestUserText(memory.shortTerm); // 最新用户句
     parsed = {
@@ -1076,7 +1237,7 @@ export async function POST(req: Request) {
       }
       // 总结：基于短期窗口 + 高优先级记忆做要点归纳
       case "summary": {
-        const text = await summarizeWithModel(memory.shortTerm, toolInput, memory); // 生成总结
+        const text = await summarizeWithModel(memory.shortTerm, toolInput, memory, rt); // 生成总结
         logAgent("result", {
           action: parsed.action, // 动作
           durationMs: Date.now() - actionStart, // 耗时
@@ -1086,7 +1247,7 @@ export async function POST(req: Request) {
       }
       // 待办：模型生成 JSON 任务列表，失败时用内置占位项
       case "todo": {
-        const items = await generateTodosWithModel({ userInput: toolInput, memory }); // 生成待办
+        const items = await generateTodosWithModel({ userInput: toolInput, memory, rt }); // 生成待办
         logAgent("result", {
           action: parsed.action, // 动作
           durationMs: Date.now() - actionStart, // 耗时
@@ -1099,7 +1260,7 @@ export async function POST(req: Request) {
         const chatContent =
           parsed.content.trim().length > 0
             ? parsed.content // 非空直接用路由正文
-            : await generateFallbackChat(modelMessages); // 否则二次生成
+            : await generateFallbackChat(modelMessages, rt); // 否则二次生成
         logAgent("result", {
           action: parsed.action, // 通常为 chat
           durationMs: Date.now() - actionStart, // 耗时
