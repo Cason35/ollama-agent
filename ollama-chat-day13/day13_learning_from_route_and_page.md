@@ -94,3 +94,198 @@
 - **并行步骤 / 条件分支**：在纯线性 `for` 之上引入依赖或简单分支（例如仅当某步成功才跑某步）。  
 - **流式 UI**：Server-Sent Events 或流式接口逐步推送 `step.status`，避免长工作流期间界面长时间静止。  
 - **人机协同**：某步失败时允许用户改 `input` 或跳过并继续，而不是整单失败。
+
+---
+
+## 第14天学习计划：Workflow 上下文链 + Step Dependency（关键）
+
+### 第14天核心目标
+
+让 Workflow 的步骤之间真正「互相依赖」。
+
+现在你的 Workflow 很可能还是：
+
+- Step1 独立执行
+- Step2 独立执行
+- Step3 独立执行
+
+但真实 Workflow 是：
+
+- Step2 依赖 Step1 输出
+- Step3 依赖 Step2 输出
+
+#### 第14天你最终要做出的效果
+
+**用户输入：**
+
+> 帮我总结今天学习内容，然后生成明天待办
+
+**系统：**
+
+- **Step1:** `summary` → 输出总结
+- **Step2:** `todo` → 使用 summary 的结果生成待办
+
+👉 这才是真正 Workflow。
+
+### 任务1：实现 Step Output Context
+
+**目标：** 后面的 step 能读取前面的结果。
+
+**新增字段：**
+
+```ts
+type WorkflowStep = {
+  id: string
+  name: string
+  action: string
+  input: string
+
+  dependsOn?: string[]
+
+  output?: unknown
+}
+```
+
+**示例：**
+
+```json
+[
+  {
+    "id": "step1",
+    "action": "summary"
+  },
+  {
+    "id": "step2",
+    "action": "todo",
+    "dependsOn": ["step1"]
+  }
+]
+```
+
+### 任务2：实现 Context Injection（核心）
+
+**Executor 升级**
+
+- 现在：`runTodo(step.input)`
+- 升级成：
+
+```ts
+const dependencyOutputs = getDependencyOutputs(step)
+
+runTodo({
+  input: step.input,
+  context: dependencyOutputs
+})
+```
+
+**示例 Prompt：**
+
+```
+请基于以下内容生成 todo：
+
+【依赖步骤结果】
+${context}
+
+【当前任务】
+${input}
+```
+
+**效果：** `todo` 不再「瞎生成」，而是基于 `summary` 结果继续工作。
+
+### 任务3：Planner 学会「依赖关系」
+
+**之前** Planner 只拆步骤：
+
+```json
+[
+  { "action": "summary" },
+  { "action": "todo" }
+]
+```
+
+**现在要学会：**
+
+```json
+[
+  {
+    "id": "step1",
+    "action": "summary"
+  },
+  {
+    "id": "step2",
+    "action": "todo",
+    "dependsOn": ["step1"]
+  }
+]
+```
+
+**Planner Prompt 升级：** 如果后续步骤需要前面步骤结果，请使用 `dependsOn`。例如：`summary` → `todo`，则 `todo` 的 `dependsOn` 指向 `summary` 所在步骤 id。
+
+### 任务4：Workflow Chain Debug 面板
+
+**前端展示：**
+
+- Step1 ✅ — 输出：……  
+  ↓ 被 Step2 使用  
+- Step2 ✅ — 输入上下文：……
+
+**验收标准：**
+
+- 能看到 `dependency`
+- 能看到上下文传递
+- 能看到链式执行
+
+### 任务5：实现 Workflow Final Synthesizer（重要）
+
+现在你的 workflow 可能只是：`step1 output`、`step2 output`、`step3 output` 分段展示。
+
+但真实 Agent 最后会 **汇总**。
+
+**新增：** `synthesizeWorkflowResult(workflow)`
+
+**Prompt：**
+
+```
+请把以下 workflow 结果整理成最终回答：
+
+${allStepOutputs}
+```
+
+**最终效果：** 用户不会看到 `step1:` / `step2:` / `step3:` 分段罗列，而是 **一个自然、完整的最终回答**。
+
+### 第14天核心认知（非常重要）
+
+1. **Workflow ≠ 多工具循环**  
+   真正 Workflow 是「步骤之间存在因果依赖」。
+
+2. **Context Passing 是 Agent 核心**  
+   这一步开始，你真正进入 **Agent Runtime**。
+
+3. **Planner 不只是「拆步骤」**  
+   还必须：建 `dependency`、管上下文、控制执行顺序。
+
+### 第14天打卡模板
+
+【第14天打卡】
+
+1. 是否实现 step `dependsOn`：是 / 否  
+2. 是否实现 dependency output 注入：是 / 否  
+3. `todo` 是否能使用 `summary` 输出：是 / 否  
+4. Workflow 是否真正形成链式执行：是 / 否  
+5. Planner 是否能生成 `dependsOn`：是 / 否  
+6. 是否实现 workflow synthesize：是 / 否  
+7. 前端是否展示 dependency chain：是 / 否  
+8. 遇到的最大问题：  
+9. 当前系统能力：
+
+### 做完第14天后会发生什么？
+
+你会真正拥有 **一个「最小 Agent Runtime」**，然后可以进入：
+
+- 并行 Workflow  
+- Retry  
+- HITL  
+- RAG Workflow  
+- Tool Graph  
+
+这些就是真正高级 Agent 的核心了。
