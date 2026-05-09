@@ -1,6 +1,8 @@
 /**
  * Next.js App Router：`POST /api/chat` —— 带记忆与工具路由的聊天接口。
  *
+ * 注释约定：可执行代码行尽量带行尾「//」中文说明；多处多行模板字符串内为模型提示词正文，无法在字符串内部写行尾注释，含义以构造该模板的变量名与邻近注释为准。
+ *
  * 整体流程：
  * 1. 解析请求中的 messages 与可选 memory，调用 buildMemory 组装「短期窗口 + 长期条目」并生成喂给模型的 messages；
  * 2. 用专用 system 提示词走一轮聊天模型（本地 Ollama 或小米 MiMo OpenAI 兼容接口），让模型输出 JSON 形式的 action（路由）；
@@ -10,7 +12,7 @@
  * 外部依赖：本地 Ollama HTTP API，或小米 MiMo（`XIAOMI_MIMO_*` 环境变量）；天气分支使用 Open-Meteo（无需 key）。
  */
 
-import { MIMO_MODEL_IDS, type MimoModelId } from "@/lib/mimo-models";
+import { MIMO_MODEL_IDS, type MimoModelId } from "@/lib/mimo-models"; // 小米 MiMo 模型 id 白名单与联合类型，供校验与默认模型
 
 /** 与前端约定的单条对话消息（仅 user / assistant 文本）。 */
 type ChatMessage = {
@@ -159,34 +161,37 @@ async function invokeChatModel(
   messages: Array<{ role: string; content: string }>
 ): Promise<{ ok: boolean; status: number; text: string }> {
   if (rt.provider === "local") {
+    // 走本地 Ollama：请求体为 Ollama 原生 /api/chat 格式
     const res = await fetch(rt.ollamaUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", // HTTP 方法：POST JSON
+      headers: { "Content-Type": "application/json" }, // 声明 JSON 请求体
       body: JSON.stringify({
-        model: rt.ollamaModel,
-        messages,
-        stream: false,
-      }),
-    });
-    const rawText = await res.text();
-    let text = "";
+        model: rt.ollamaModel, // 本地要调用的模型名（如 qwen2.5:14b）
+        messages, // 与 OpenAI 风格兼容的消息数组（role + content）
+        stream: false, // 本路由统一非流式，便于一次性解析完整 JSON/文本
+      }), // 序列化请求体
+    }); // 发起 fetch 并等待响应
+    const rawText = await res.text(); // 无论成功失败先读整段文本，便于分支解析
+    let text = ""; // 最终抽取的助手正文或错误摘要
     if (res.ok) {
+      // HTTP 2xx：按 Ollama 成功响应结构取 message.content
       try {
-        const data = JSON.parse(rawText) as { message?: { content?: string } };
-        text = data.message?.content?.trim() || "";
+        const data = JSON.parse(rawText) as { message?: { content?: string } }; // Ollama 典型：{ message: { content } }
+        text = data.message?.content?.trim() || ""; // 安全链式读取并去掉首尾空白
       } catch {
-        text = "";
-      }
+        text = ""; // JSON 非法或结构不符时视为无正文
+      } // try/catch 结束
     } else {
+      // HTTP 非 2xx：尽量从 Ollama error 字段取可读原因，否则截断原始响应
       try {
-        const data = JSON.parse(rawText) as { error?: string };
-        text = (typeof data.error === "string" ? data.error : "") || rawText.slice(0, 800);
+        const data = JSON.parse(rawText) as { error?: string }; // Ollama 错误常见为 { error: string }
+        text = (typeof data.error === "string" ? data.error : "") || rawText.slice(0, 800); // 优先 error，否则截断防日志过长
       } catch {
-        text = rawText.slice(0, 800);
-      }
-    }
-    return { ok: res.ok, status: res.status, text };
-  }
+        text = rawText.slice(0, 800); // 非 JSON 错误页时直接截断原文
+      } // try/catch 结束
+    } // if (res.ok) 分支结束
+    return { ok: res.ok, status: res.status, text }; // 与 MiMo 分支统一返回三元组
+  } // local 分支结束
 
   const base = normalizeApiBase(rt.mimoBaseUrl); // 规范化小米网关基址
   const res = await fetch(`${base}/chat/completions`, {
@@ -200,37 +205,39 @@ async function invokeChatModel(
       model: rt.mimoModel, // 前端选择的具体 MiMo 模型 id
       messages, // 与 Ollama 侧相同的消息数组
       stream: false, // 本接口走非流式一次性返回
-    }),
-  });
+    }), // MiMo 请求体序列化结束
+  }); // fetch chat/completions 结束
   const rawText = await res.text(); // 原始响应文本（成功/失败统一先读字符串）
   let text = ""; // 解析出的助手正文或错误摘要
   if (res.ok) {
+    // MiMo/OpenAI 成功：choices[0].message.content 为主文案
     try {
       const data = JSON.parse(rawText) as {
         choices?: Array<{ message?: { content?: string } }>; // OpenAI 风格 choices
-      };
+      }; // 解析成功响应 JSON
       text = data.choices?.[0]?.message?.content?.trim() || ""; // 取首条 choice 的 message.content
     } catch {
       text = ""; // JSON 异常则视为无正文
-    }
+    } // try/catch（成功分支）
   } else {
+    // MiMo/OpenAI 错误：兼容 error 为对象或字符串
     try {
       const data = JSON.parse(rawText) as {
         error?: { message?: string } | string; // 兼容对象或字符串 error
-      };
+      }; // 解析错误响应 JSON
       if (typeof data.error === "object" && data.error?.message) {
         text = data.error.message; // 读出 OpenAI 式 error.message
       } else if (typeof data.error === "string") {
         text = data.error; // 简单字符串错误
       } else {
         text = rawText.slice(0, 800); // 无法结构化则截取原始片段避免日志爆炸
-      }
+      } // if/else error 形态
     } catch {
       text = rawText.slice(0, 800); // 解析失败同样截取正文
-    }
-  }
+    } // try/catch（错误分支）
+  } // if (res.ok) MiMo
   return { ok: res.ok, status: res.status, text }; // 与 local 分支统一返回形状
-}
+} // invokeChatModel 函数结束
 
 // ---------- 规则抽取 / 重要性推断用的正则 ----------
 
@@ -784,15 +791,15 @@ async function generateTodosWithModel(args: {
   const highBlock = formatMemoryBlock(memory.items, "high"); // 高优先级记忆块
   const lowBlock = formatMemoryBlock(memory.items, "low"); // 其他记忆块
 
-  const dep = dependencyContext?.trim();
-  const linear = !dep && chainPrefix?.trim() ? chainPrefix.trim() : "";
+  const dep = dependencyContext?.trim(); // 显式依赖链上下文：来自 dependsOn 步骤的成功输出拼接
+  const linear = !dep && chainPrefix?.trim() ? chainPrefix.trim() : ""; // 无依赖时：用线性前置步骤输出作弱上下文
 
   const workflowBlock =
     dep
-      ? `请基于以下内容生成待办（必须结合依赖步骤结果）：\n\n【依赖步骤结果】\n${dep}\n\n【当前任务】\n${userInput}\n`
+      ? `请基于以下内容生成待办（必须结合依赖步骤结果）：\n\n【依赖步骤结果】\n${dep}\n\n【当前任务】\n${userInput}\n` // 依赖模式：把依赖结果与用户本步任务一并写进提示
       : linear
-        ? `\n【前置步骤输出】\n${linear}\n\n`
-        : "";
+        ? `\n【前置步骤输出】\n${linear}\n\n` // 线性模式：仅追加「前置输出」段，结构较松
+        : ""; // 既无依赖也无前置：不注入额外工作流块
 
   const prompt = dep
     ? `
@@ -914,14 +921,14 @@ function parsePlannerPlanOutput(modelOutput: string): PlannerPlanItem[] {
     const out: PlannerPlanItem[] = []; // 累积合法步骤
     for (const row of parsed) {
       if (!row || typeof row !== "object") continue; // 跳过非法元素
-      const idRaw = (row as { id?: unknown }).id;
-      const idCandidate = typeof idRaw === "string" && idRaw.trim() ? idRaw.trim() : undefined;
-      const depRaw = (row as { dependsOn?: unknown }).dependsOn;
+      const idRaw = (row as { id?: unknown }).id; // Planner 可选提供的步骤 id（原始未知类型）
+      const idCandidate = typeof idRaw === "string" && idRaw.trim() ? idRaw.trim() : undefined; // 仅非空字符串才采纳，否则留 undefined 待 finalize 补全
+      const depRaw = (row as { dependsOn?: unknown }).dependsOn; // 依赖 id 列表的原始值
       const dependsOn = Array.isArray(depRaw)
         ? depRaw
-            .filter((d): d is string => typeof d === "string" && d.trim().length > 0)
-            .map((d) => d.trim())
-        : [];
+            .filter((d): d is string => typeof d === "string" && d.trim().length > 0) // 过滤掉非字符串与空串
+            .map((d) => d.trim()) // 统一去掉首尾空白，避免依赖匹配失败
+        : []; // 非数组则视为无依赖
       const name = String((row as { name?: unknown }).name || "").trim() || "步骤"; // 步骤名
       const input = normalizePlannerStepInput((row as { input?: unknown }).input); // 步骤输入（兼容对象）
       const action = normalizeWorkflowAction((row as { action?: unknown }).action); // 动作
@@ -946,56 +953,56 @@ function parsePlannerPlanOutput(modelOutput: string): PlannerPlanItem[] {
 /** 补全 Planner 步骤的稳定 id，并裁剪 dependsOn 中不存在的引用。 */
 function finalizePlannerPlanItems(items: PlannerPlanItem[]): FinalizedPlannerPlanItem[] {
   const withIds: FinalizedPlannerPlanItem[] = items.map((it, i) => ({
-    ...it,
-    id: it.id ?? `step-${i + 1}`,
-  }));
-  const used = new Set<string>();
+    ...it, // 保留 name/action/input/dependsOn 等字段
+    id: it.id ?? `step-${i + 1}`, // Planner 未给 id 时用 1-based 稳定缺省名
+  })); // 第一轮：保证每条都有字符串 id
+  const used = new Set<string>(); // 记录已占用的 id，用于检测冲突
   for (let i = 0; i < withIds.length; i++) {
-    let id = withIds[i].id;
+    let id = withIds[i].id; // 当前步骤 id（可能被改写）
     if (used.has(id)) {
-      id = `step-${i + 1}-${globalThis.crypto.randomUUID().slice(0, 8)}`;
-      withIds[i] = { ...withIds[i], id };
-    }
-    used.add(id);
-  }
-  const idSet = new Set(withIds.map((x) => x.id));
+      id = `step-${i + 1}-${globalThis.crypto.randomUUID().slice(0, 8)}`; // 冲突则追加短随机后缀，保证全局唯一
+      withIds[i] = { ...withIds[i], id }; // 写回修正后的 id
+    } // 冲突处理结束
+    used.add(id); // 登记当前 id 为已使用
+  } // for 遍历所有步骤
+  const idSet = new Set(withIds.map((x) => x.id)); // 合法 id 集合，用于裁剪无效 dependsOn
   return withIds.map((it) => ({
-    ...it,
-    dependsOn: it.dependsOn?.filter((d) => idSet.has(d)),
-  }));
+    ...it, // 展开步骤其它字段
+    dependsOn: it.dependsOn?.filter((d) => idSet.has(d)), // 去掉指向不存在步骤的依赖边，避免执行器找不到 dep
+  })); // 返回最终可执行的计划项
 }
 
 /** 按 dependsOn 拓扑排序步骤（同一 DAG 仍保持深度优先相对稳定）。 */
 function topologicalSortWorkflowSteps(steps: WorkflowStep[]): WorkflowStep[] {
-  const byId = new Map(steps.map((s) => [s.id, s]));
-  const visiting = new Set<string>();
-  const done = new Set<string>();
-  const ordered: WorkflowStep[] = [];
+  const byId = new Map(steps.map((s) => [s.id, s])); // id -> 步骤对象，便于 O(1) 查依赖
+  const visiting = new Set<string>(); // DFS 栈上的节点：用于环检测
+  const done = new Set<string>(); // 已完成访问并入序的节点
+  const ordered: WorkflowStep[] = []; // 拓扑序结果（依赖在前）
 
   function visit(step: WorkflowStep): void {
-    if (done.has(step.id)) return;
+    if (done.has(step.id)) return; // 已排序过则跳过
     if (visiting.has(step.id)) {
-      console.warn("[Workflow] dependency cycle at step:", step.id);
-      return;
-    }
-    visiting.add(step.id);
+      console.warn("[Workflow] dependency cycle at step:", step.id); // 环：依赖指向了正在访问的祖先
+      return; // 环上节点不再深入，避免无限递归
+    } // 环检测分支结束
+    visiting.add(step.id); // 标记进入当前子 DAG
     for (const depId of step.dependsOn ?? []) {
-      const dep = byId.get(depId);
-      if (dep) visit(dep);
-    }
-    visiting.delete(step.id);
-    done.add(step.id);
-    ordered.push(step);
-  }
+      const dep = byId.get(depId); // 解析依赖 id 到步骤；非法 id 则 dep 为 undefined
+      if (dep) visit(dep); // 先递归访问所有依赖
+    } // 依赖循环结束
+    visiting.delete(step.id); // 回溯：离开当前节点子树
+    done.add(step.id); // 标记本节点已完成
+    ordered.push(step); // 后序追加：保证依赖先于当前步出现在 ordered 中
+  } // visit 定义结束
 
-  for (const s of steps) visit(s);
+  for (const s of steps) visit(s); // 对每个根/孤立节点启动 DFS，覆盖全图
 
   if (ordered.length < steps.length) {
     for (const s of steps) {
-      if (!done.has(s.id)) ordered.push(s);
-    }
-  }
-  return ordered;
+      if (!done.has(s.id)) ordered.push(s); // 环或脏依赖导致未入序的步骤，按原列表顺序追加兜底
+    } // 补全循环结束
+  } // 长度不一致时的修复
+  return ordered; // 返回可能含「末尾兜底块」的执行顺序
 }
 
 /** 聚合依赖步骤的成功输出为一段注入文本（供下游工具 prompt 使用）。 */
@@ -1003,16 +1010,16 @@ function formatDependencyOutputsForStep(
   step: WorkflowStep,
   byId: Map<string, WorkflowStep>
 ): string {
-  const ids = step.dependsOn ?? [];
-  if (ids.length === 0) return "";
-  const parts: string[] = [];
+  const ids = step.dependsOn ?? []; // 本步骤声明依赖的步骤 id 列表
+  if (ids.length === 0) return ""; // 无依赖：下游工具不需要注入其它步输出
+  const parts: string[] = []; // 收集每段「步骤名 + 输出正文」
   for (const depId of ids) {
-    const dep = byId.get(depId);
-    if (!dep || dep.status !== "success") continue;
-    const body = typeof dep.output === "string" ? dep.output : JSON.stringify(dep.output ?? "");
-    parts.push(`【${dep.name}】（id: ${depId}）\n${body}`);
-  }
-  return parts.join("\n\n");
+    const dep = byId.get(depId); // 按 id 取依赖步骤运行时对象
+    if (!dep || dep.status !== "success") continue; // 未执行或失败：不参与拼接，避免把错误混进 prompt
+    const body = typeof dep.output === "string" ? dep.output : JSON.stringify(dep.output ?? ""); // 统一成可嵌入提示的字符串
+    parts.push(`【${dep.name}】（id: ${depId}）\n${body}`); // 带可读标题与 id，便于模型区分来源
+  } // 遍历依赖 id
+  return parts.join("\n\n"); // 多段之间空行分隔，结构更清晰
 }
 
 /** Workflow Planner：把用户复杂需求拆成 1-4 个可执行步骤。 */
@@ -1086,29 +1093,29 @@ async function runWorkflowChatDirect(
   memory: Memory,
   rt: ModelRuntime
 ): Promise<string> {
-  const memText = formatMemoryForPlanner(memory);
+  const memText = formatMemoryForPlanner(memory); // 与 runWorkflowChat 一致：把高/低记忆格式化为 Planner 可读块
   const { ok, text } = await invokeChatModel(rt, [
     {
-      role: "system",
-      content: `你是简洁的中文助手。结合用户长期记忆完成任务，不要输出 JSON。\n\n长期记忆：\n${memText}`,
-    },
-    { role: "user", content: fullUserBody },
-  ]);
-  if (!ok) return "该步骤失败：模型暂不可用。";
-  return text || "（无输出）";
+      role: "system", // 系统层：人设 + 长期记忆约束
+      content: `你是简洁的中文助手。结合用户长期记忆完成任务，不要输出 JSON。\n\n长期记忆：\n${memText}`, // 禁止 JSON，降低被上游路由提示污染的概率
+    }, // system 消息结束
+    { role: "user", content: fullUserBody }, // 用户层：整段已含「依赖结果 + 当前任务」结构化正文
+  ]); // 单轮补全
+  if (!ok) return "该步骤失败：模型暂不可用。"; // 与 runWorkflowChat 对齐的固定失败文案
+  return text || "（无输出）"; // 成功但空串则给占位，避免 undefined 泄漏到前端
 }
 
 /** 将各步成功产出整理为单一、自然的中文最终答复（Workflow Final Synthesizer）。 */
 async function synthesizeWorkflowResult(workflow: Workflow, rt: ModelRuntime): Promise<string> {
-  const ordered = topologicalSortWorkflowSteps(workflow.steps);
+  const ordered = topologicalSortWorkflowSteps(workflow.steps); // 与执行顺序一致地汇总（依赖仍靠前）
   const lines = ordered
     .filter((s) => s.status === "success") // 只汇总成功的步骤
     .map((s) => {
       const out =
-        typeof s.output === "string" ? s.output : JSON.stringify(s.output ?? ""); // 序列化输出
+        typeof s.output === "string" ? s.output : JSON.stringify(s.output ?? ""); // 序列化输出：对象则 JSON，字符串原样
       return `【步骤 ${s.name}】（${s.action}，id=${s.id}）\n${out}`; // 含 id 便于排障（模型可忽略括号内信息）
-    })
-    .join("\n\n");
+    }) // map 结束
+    .join("\n\n"); // 步骤块之间双换行
 
   const prompt = `
 你是 Workflow 最终汇总助手。
@@ -1124,9 +1131,9 @@ ${lines || "(无成功步骤产出)"}
 请直接输出正文，不要 JSON。
 `.trim(); // 与文档“自然完整最终回答”一致
 
-  const { ok, text } = await invokeChatModel(rt, [{ role: "user", content: prompt }]);
-  if (!ok) return lines || "工作流已完成。";
-  return text?.trim() || lines || "工作流已完成。";
+  const { ok, text } = await invokeChatModel(rt, [{ role: "user", content: prompt }]); // 仅 user 提示：由模型复读并润色为多步合一答复
+  if (!ok) return lines || "工作流已完成。"; // 汇总模型失败：退回结构化步骤拼接文本或短句占位
+  return text?.trim() || lines || "工作流已完成。"; // 优先模型润色正文，否则仍为步骤罗列或保底句
 }
 
 /**
@@ -1139,107 +1146,112 @@ async function executeWorkflow(
   rt: ModelRuntime
 ): Promise<Workflow> {
   let linearPriorOutputs = ""; // 已执行步骤的线性串联（无 dependsOn 时的上下文兜底）
-  const byId = new Map(workflow.steps.map((s) => [s.id, s]));
-  const ordered = topologicalSortWorkflowSteps(workflow.steps);
+  const byId = new Map(workflow.steps.map((s) => [s.id, s])); // 运行时 id → 可变步骤引用（回填 output/status）
+  const ordered = topologicalSortWorkflowSteps(workflow.steps); // 拓扑序：依赖先执行
 
   for (const step of ordered) {
     const stepStart = Date.now(); // 单步计时起点（计算 durationMs）
     step.status = "running"; // 进入执行中状态
 
-    const depTextRaw = formatDependencyOutputsForStep(step, byId); // 仅来自 dependsOn
-    const hasExplicitDeps = Boolean(step.dependsOn?.length); // Planner 是否声明依赖链
-    const injectedPreview = hasExplicitDeps ? depTextRaw : linearPriorOutputs || "";
-    step.injectedContextPreview = injectedPreview || undefined;
+    const depTextRaw = formatDependencyOutputsForStep(step, byId); // 仅来自 dependsOn：已成功的上游输出拼接串
+    const hasExplicitDeps = Boolean(step.dependsOn?.length); // Planner 是否声明依赖链（区别于纯线性前缀）
+    const injectedPreview = hasExplicitDeps ? depTextRaw : linearPriorOutputs || ""; // 预览字段：依赖模式只看 dep，否则看线性前缀
+    step.injectedContextPreview = injectedPreview || undefined; // 供前端调试：本步开始前实际注入工具的上下文快照
 
-    const linearChainPrefix = !hasExplicitDeps ? linearPriorOutputs || undefined : undefined;
-    const dependencyTodoContext = hasExplicitDeps ? depTextRaw || undefined : undefined;
+    const linearChainPrefix = !hasExplicitDeps ? linearPriorOutputs || undefined : undefined; // 无显式 dependsOn 时把历史步输出串给 summary/todo/chat
+    const dependencyTodoContext = hasExplicitDeps ? depTextRaw || undefined : undefined; // 有待办依赖时单独传 dependencyContext 分支构造 prompt
 
     logWorkflow("step", {
       goal: workflow.goal, // 工作流目标上下文
-      stepId: step.id,
+      stepId: step.id, // 当前步骤 id（与 Planner dependsOn 对齐）
       step: step.name, // 当前步骤名
       action: step.action, // 当前工具类型
       status: step.status, // 应为 running
-      dependsOn: step.dependsOn ?? [],
-      hasExplicitDeps,
+      dependsOn: step.dependsOn ?? [], // 依赖 id 列表（可能为空数组）
+      hasExplicitDeps, // 是否走路由「显式依赖」分支的布尔标记
     }); // 步骤开始日志
 
     try {
       let out: unknown; // 本步工具产出的原始结果
       if (step.action === "summary") {
+        // 总结步：把短期对话 + 本步 input 合并总结，链式场景下注入 dep 或线性前缀
         out = await summarizeWithModel(
-          memory.shortTerm,
-          step.input,
-          memory,
-          rt,
+          memory.shortTerm, // 当前短期窗口（用户/助手轮次）
+          step.input, // Planner 指定的总结焦点或材料提示
+          memory, // 含长期 items，供高优先级目标参考
+          rt, // 模型运行时（Ollama / MiMo）
           hasExplicitDeps ? depTextRaw || undefined : linearChainPrefix // 依赖模式仅用依赖输出（若无则仍传空由模型处理）
-        );
+        ); // summarizeWithModel 返回 string
       } else if (step.action === "todo") {
+        // 待办步：根据依赖/线性上下文生成 JSON 待办列表
         out = await generateTodosWithModel({
-          userInput: step.input,
-          memory,
-          rt,
-          chainPrefix: linearChainPrefix,
+          userInput: step.input, // 本步任务描述
+          memory, // 长期记忆约束个性化
+          rt, // 模型配置
+          chainPrefix: linearChainPrefix, // 无 dependsOn 时的线性前置输出
           dependencyContext: dependencyTodoContext && dependencyTodoContext.trim().length > 0
-            ? dependencyTodoContext
-            : undefined,
-        });
+            ? dependencyTodoContext // 有非空依赖串则走依赖型 prompt
+            : undefined, // 否则不传，避免与 chainPrefix 重复
+        }); // 返回 TodoItem[]
       } else if (step.action === "weather") {
-        const latestUser = getLatestUserText(memory.shortTerm);
+        // 天气步：从 step.input 与最新用户话术中解析城市关键词
+        const latestUser = getLatestUserText(memory.shortTerm); // 兜底：用户可能在自然句里带城市名
         const stepText =
           step.input && step.input !== "[object Object]" ? step.input : ""; // 规避历史 String(object) 污染
-        const keyword = extractWeatherCity(stepText || latestUser);
-        out = await realWeather(keyword); // weather 暂不注入工作流上下文
+        const keyword = extractWeatherCity(stepText || latestUser); // 归一化到 cityMap 键或清洗串
+        out = await realWeather(keyword); // weather 暂不注入工作流上下文：独立 HTTP 查询
       } else if (hasExplicitDeps && depTextRaw.trim()) {
+        // 非 summary/todo/weather 且存在依赖输出：整段 user 一次性交给模型（ chat 变体）
         out = await runWorkflowChatDirect(
-          `【依赖步骤结果】\n${depTextRaw}\n\n【当前任务】\n${step.input}`,
-          memory,
-          rt
-        );
+          `【依赖步骤结果】\n${depTextRaw}\n\n【当前任务】\n${step.input}`, // 结构化两段落，降低模型漏读依赖的概率
+          memory, // 注入长期记忆 system
+          rt // 模型配置
+        ); // 返回 string
       } else {
+        // 默认 chat 步：前置输出 + 当前任务的双段 user
         out = await runWorkflowChat(step.input, linearPriorOutputs || undefined, memory, rt);
-      }
+      } // action 分支结束
 
-      step.output = out;
-      step.status = "success";
-      step.durationMs = Date.now() - stepStart;
+      step.output = out; // 回填工具原始结果供汇总与前端展示
+      step.status = "success"; // 标记本步成功（供 synthesize 过滤）
+      step.durationMs = Date.now() - stepStart; // 记录 wall-clock 耗时
       linearPriorOutputs = [linearPriorOutputs, `[${step.name}]\n${typeof out === "string" ? out : JSON.stringify(out)}`]
         .filter(Boolean)
         .join("\n\n"); // 保持线性可追溯
 
-      console.log("[Workflow] output:", step.output);
+      console.log("[Workflow] output:", step.output); // 控制台可查每步原始输出（与结构化 logWorkflow 互补）
 
       logWorkflow("step", {
-        goal: workflow.goal,
-        stepId: step.id,
-        step: step.name,
-        action: step.action,
-        status: step.status,
-        durationMs: step.durationMs,
-        dependsOn: step.dependsOn ?? [],
-        injectedContextPreview: step.injectedContextPreview,
-      });
+        goal: workflow.goal, // 工作流目标
+        stepId: step.id, // 步骤 id
+        step: step.name, // 步骤名称
+        action: step.action, // 工具类型
+        status: step.status, // 此时应为 success
+        durationMs: step.durationMs, // 本步耗时 ms
+        dependsOn: step.dependsOn ?? [], // 依赖列表
+        injectedContextPreview: step.injectedContextPreview, // 注入预览（若有）
+      }); // 步骤成功结束日志
     } catch (err) {
-      step.status = "failed";
-      step.error = err instanceof Error ? err.message : String(err);
-      step.durationMs = Date.now() - stepStart;
-      workflow.status = "failed";
+      step.status = "failed"; // 标记本步失败
+      step.error = err instanceof Error ? err.message : String(err); // 统一成可读错误串
+      step.durationMs = Date.now() - stepStart; // 失败也记录耗时
+      workflow.status = "failed"; // 整体工作流标失败，executeWorkflow 末尾不会覆盖为 success
 
       logWorkflow("error", {
-        goal: workflow.goal,
-        stepId: step.id,
-        step: step.name,
-        action: step.action,
-        status: step.status,
-        error: step.error,
-        durationMs: step.durationMs,
-      });
-      break;
-    }
-  }
+        goal: workflow.goal, // 工作流目标
+        stepId: step.id, // 失败步骤 id
+        step: step.name, // 失败步骤名
+        action: step.action, // 失败时调用的工具
+        status: step.status, // 应为 failed
+        error: step.error, // 错误摘要
+        durationMs: step.durationMs, // 失败步耗时
+      }); // 错误结构化日志
+      break; // 失败即中止后续步骤（保持 partial 结果供前端展示）
+    } // try/catch 结束
+  } // for ordered 步骤循环结束
 
-  if (workflow.status !== "failed") workflow.status = "success";
-  return workflow;
+  if (workflow.status !== "failed") workflow.status = "success"; // 全部步骤未抛错则整体标成功
+  return workflow; // 返回带回填 output/status/durationMs 的同引用对象
 }
 
 /**
@@ -1257,7 +1269,7 @@ export async function POST(req: Request) {
       provider?: string; // 模型提供商开关
       /** 小米 MiMo 模型 id，仅在 provider=mimo 时生效 */
       mimoModel?: string; // MiMo 具体模型 id
-    };
+    }; // 请求 JSON 体的 TypeScript 形状断言（运行时不校验，需下方逻辑兜底）
     const { messages, memory: incomingMemory, useWorkflow, provider: providerRaw, mimoModel: mimoModelRaw } =
       body; // 解构常用字段便于后续校验
     if (!Array.isArray(messages) || messages.length === 0) {
@@ -1320,13 +1332,13 @@ export async function POST(req: Request) {
         goal, // 用户目标描述
         status: "pending", // 初始为待执行（随后会改为 running/success/failed）
         steps: planItems.map((p) => ({
-          id: p.id,
-          name: p.name,
-          action: p.action,
-          input: p.input,
-          ...(p.dependsOn?.length ? { dependsOn: p.dependsOn } : {}),
-          status: "pending" as const,
-        })),
+          id: p.id, // 稳定步骤 id（可能含随机后缀防冲突）
+          name: p.name, // Planner 可读标题
+          action: p.action, // chat | summary | todo | weather
+          input: p.input, // 已规范化的字符串入参
+          ...(p.dependsOn?.length ? { dependsOn: p.dependsOn } : {}), // 有依赖则展开写入，否则不写该字段
+          status: "pending" as const, // 初始未执行；executeWorkflow 会改为 running/success/failed
+        })), // FinalizedPlannerPlanItem → WorkflowStep 雏形
       };
 
       workflow.status = "running"; // 开始顺序执行前先标为进行中
@@ -1344,8 +1356,8 @@ export async function POST(req: Request) {
       const failedStep = wfDone.steps.find((s) => s.status === "failed"); // 首个失败步
       const finalSummary =
         wfDone.status === "success"
-          ? await synthesizeWorkflowResult(wfDone, rt)
-          : `工作流中断：${failedStep?.error || "未知错误"}`;
+          ? await synthesizeWorkflowResult(wfDone, rt) // 全成功：再问模型揉成一段自然语言总答复
+          : `工作流中断：${failedStep?.error || "未知错误"}`; // 有失败步：直接向用户交代错误原因
 
       logAgent("result", {
         action: "workflow", // Agent 顶层动作为 workflow
