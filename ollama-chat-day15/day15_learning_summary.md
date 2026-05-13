@@ -1,6 +1,6 @@
-# 第15天学习总结：Workflow Runtime 工程化
+# 第15天学习总结：Workflow Runtime 工程化（含第16天学习计划）
 
-本文档对应「第14天学习预告」中的第15天任务（Workflow Validation、Auto Repair、DAG 执行、步骤重试与 Execution Timeline），并结合 `ollama-chat-day15` 中 `app/api/chat/route.ts` 与 `app/page.tsx` 的实际实现做归纳。
+本文档对应「第14天学习预告」中的第15天任务（Workflow Validation、Auto Repair、DAG 执行、步骤重试与 Execution Timeline），并结合 `ollama-chat-day15` 中 `app/api/chat/route.ts` 与 `app/page.tsx` 的实际实现做归纳。**文末 §12 起为第16天学习计划**（Parallel DAG Runtime V2），与第15天串行执行形成对照。
 
 ---
 
@@ -129,4 +129,159 @@ Workflow 分支在进入 `executeWorkflow` 之前走固定管线：
 
 ---
 
-*文档生成依据：`ollama-chat-day14/day14_learning_summary.md` 第15天预告（§8）、`ollama-chat-day15/app/api/chat/route.ts`、`ollama-chat-day15/app/page.tsx`。*
+## 12. 第16天学习计划：Parallel Workflow + Branch Execution（核心升级）
+
+### 12.1 核心目标
+
+让 Runtime 支持 **「多个 step 同时执行」**，从「单链串行」升级为 **真正的 DAG 调度器（Parallel / DAG Scheduler）**。
+
+### 12.2 当前限制 vs 目标形态
+
+**第15天及之前的典型形态**：`step1 → step2 → step3` 全部串行 —— 偏慢、扩展性差。
+
+**目标：Parallel Workflow（DAG Runtime）**：
+
+```text
+        step1
+       /     \
+   step2   step3
+       \     /
+        step4
+```
+
+### 12.3 第16天「最终效果」示例（用户意图 → 系统行为）
+
+用户输入示例：帮我 1）查北京天气 2）总结今天学习内容 3）生成明天 todo。
+
+系统行为示意：
+
+- **Batch 1（并行）**：`step1 weather`、`step2 summary`、`step3 todo` 在无互相未完成依赖时可同批执行。
+- **Batch 2**：`step4 synthesize` 在依赖满足后执行（具体依赖边由 Planner / 图结构决定）。
+
+---
+
+### 12.4 任务 1：识别「可并行节点」
+
+**目标**：找出当前时刻 **所有依赖已满足、尚未执行** 的步骤 —— 典型特征是 **没有未完成的 `dependsOn` 前置**（实现上常表现为「入度为 0 的待执行节点」在动态调度中的变体）。
+
+**新增能力**：`getRunnableSteps()` —— 返回当前轮次可一并调度的 step 列表。
+
+**示例（概念）**：
+
+| DAG 片段 | 第一轮 runnable | 第二轮 runnable |
+|----------|-----------------|-----------------|
+| `step1 weather`；`step2 summary`；`step3 todo` 依赖 `step2` | `step1`、`step2` | `step3`（在 `step2` 成功后） |
+
+---
+
+### 12.5 任务 2：实现 Parallel Executor（重点）
+
+**现状**：`for (const step of steps)` 按序串行。
+
+**升级**：对每一批 `runnableSteps` 使用 **`await Promise.all(runnable.map(runStep))`** 并行执行。
+
+**核心调度循环（结构要点）**：
+
+```ts
+while (hasPendingSteps()) {
+  const runnable = getRunnableSteps();
+  await Promise.all(runnable.map((step) => executeStep(step)));
+}
+```
+
+到这一步，Runtime 才第一次具备 **DAG Scheduler** 语义：按依赖分层、层内并行。
+
+---
+
+### 12.6 任务 3：Step 状态机（重点）
+
+**现状**：`pending` → `running` → `success` / `failed` 偏简单。
+
+**升级**：扩展为更贴近并行调度与依赖语义的类型，例如：
+
+```ts
+type StepStatus =
+  | "pending"
+  | "queued"
+  | "running"
+  | "success"
+  | "failed"
+  | "blocked";
+```
+
+**为何需要 `blocked` / `queued`**：并行后，有的 step 已可运行，有的仍在等依赖；若某依赖失败，下游应进入 **阻塞** 而非继续执行。
+
+**示例**：`step4` 因 `step2 failed` 且 `step4 dependsOn step2` → `step4` 标记为 `blocked`。
+
+---
+
+### 12.7 任务 4：失败传播（Failure Propagation）
+
+**目标**：任一依赖失败后，**后续依赖该节点的 step 不得继续执行**，并显式标记为 `blocked`（或等价语义）。
+
+**Executor 增强思路**：
+
+```ts
+if (hasFailedDependency(step)) {
+  step.status = "blocked";
+}
+```
+
+由此形成清晰的 **Runtime Failure Model**：失败沿依赖边向下游传播，避免「上游已挂、下游仍跑」的假成功。
+
+---
+
+### 12.8 任务 5：Workflow Graph 可视化
+
+**前端**：展示步骤与依赖 —— 最简单可先基于 `step.dependsOn` 渲染依赖链或邻接列表（如 `weather ✅`、`summary ✅`、`todo ⏳`，再汇聚到 `synthesize`）。
+
+**后续可增强**：React Flow、专用 DAG 编辑器等。
+
+---
+
+### 12.9 任务 6：Execution Batch Timeline
+
+**现状**：时间线多为逐步串行：`step1` → `step2` → `step3`。
+
+**升级**：按 **调度批次** 展示，例如：
+
+- **Batch #1**：`step1 running`、`step2 running`（同批并行）
+- **Batch #2**：`step3 running`
+
+便于直观看到 **Scheduler 的分批与并行边界**。
+
+---
+
+### 12.10 第16天核心认知
+
+1. **Workflow Runtime 的本质**不是单纯 `for-loop`，而是 **DAG Scheduling**（在满足依赖的前提下分批、可并行）。
+2. **并行是 Runtime 分水岭**：无并行更像「任务链」；有并行才接近 **Workflow Engine**。
+3. **Failure Propagation 必须存在**：依赖失败后，下游不能继续「正常执行」，应阻塞或短路并对外一致暴露状态。
+
+---
+
+### 12.11 第16天打卡模板
+
+**【第16天打卡】**
+
+1. 是否实现 runnable step 检测：是 / 否  
+2. 是否实现 Parallel Executor：是 / 否  
+3. 是否实现 `Promise.all` 并行执行：是 / 否  
+4. 是否实现 Step State Machine：是 / 否  
+5. 是否新增 `blocked` / `queued` 状态：是 / 否  
+6. 是否实现 failure propagation：是 / 否  
+7. 前端是否展示 DAG 结构：是 / 否  
+8. 是否展示 batch timeline：是 / 否  
+9. 遇到的最大问题：（自由填写）  
+10. 当前系统能力：（自由填写）
+
+---
+
+## 13. 做完第16天后的预期位置
+
+- **能力**：**Parallel DAG Runtime V2**（分层调度 + 层内并行 + 失败传播 + 更丰富步骤状态 + 图与时间线可观测）。
+- **下一阶段方向**（在并行 DAG 稳定之后才真正展开）：**Conditional Branch**、**Human-in-the-loop**、**Tool Memory**、**RAG Workflow**、**Multi-Agent** 等。
+
+---
+
+*文档生成依据：`ollama-chat-day14/day14_learning_summary.md` 第15天预告（§8）、`ollama-chat-day15/app/api/chat/route.ts`、`ollama-chat-day15/app/page.tsx`；**第16天**为本文 §12 所收录的学习计划（Parallel Workflow / DAG Scheduler / 状态机与失败模型 / 可视化与时间线）。*
