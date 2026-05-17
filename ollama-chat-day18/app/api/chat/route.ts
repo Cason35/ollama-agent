@@ -1,0 +1,2226 @@
+/**
+ * Next.js App Router：`POST /api/chat` —— 带记忆与工具路由的聊天接口。
+ *
+ * 注释约定：可执行代码行尽量带行尾「//」中文说明；多处多行模板字符串内为模型提示词正文，无法在字符串内部写行尾注释，含义以构造该模板的变量名与邻近注释为准。
+ *
+ * 整体流程：
+ * 1. 解析请求中的 messages 与可选 memory，调用 buildMemory 组装「短期窗口 + 长期条目」并生成喂给模型的 messages；
+ * 2. 用专用 system 提示词走一轮聊天模型（本地 Ollama 或小米 MiMo OpenAI 兼容接口），让模型输出 JSON 形式的 action（路由）；
+ * 3. 结合「延续上一轮」等启发规则修正 action，再分支执行：天气 / 总结 / 待办 / 普通回复；
+ * 4. 响应体始终带上最新的 memory，供前端下一轮原样回传，形成闭环。
+ *
+ * 第16天：Workflow 执行器升级为 **并行 DAG 调度**（`getRunnableSteps` + `Promise.all` 分批）、步骤状态扩展（含 `queued` / `blocked`）、失败沿依赖向下游传播，并记录 `executionBatches` 供前端展示批次时间线。
+ * 第17天：**Conditional DAG**——`WorkflowStep.condition` + `evaluateCondition`、`skipped` 正常分支、`judge` 结构化判断、Planner/Validator 与 `[Condition]` 调试日志。
+ * 第18天：**HITL**——`requiresConfirmation` / `waiting_confirmation`、Executor 暂停、`POST /api/workflow/confirm` 续跑或取消（策略 A）、`[HITL]` 调试日志。
+ *
+ * 外部依赖：本地 Ollama HTTP API，或小米 MiMo（`XIAOMI_MIMO_*` 环境变量）；天气分支使用 Open-Meteo（无需 key）。
+ */
+
+import { MIMO_MODEL_IDS, type MimoModelId } from "@/lib/mimo-models"; // 小米 MiMo 模型 id 白名单与联合类型，供校验与默认模型
+import { savePausedWorkflow } from "@/lib/workflow-pause-store"; // 第18天：HITL 暂停时暂存可续跑上下文
+import type {
+  ExecuteWorkflowResult,
+  Workflow,
+  WorkflowExecutionBatch,
+  WorkflowStep,
+  WorkflowStepAction,
+  WorkflowStepCondition,
+  WorkflowStepStatus,
+  WorkflowTimelineEvent,
+} from "@/lib/workflow-types"; // 工作流类型与执行结果（与 confirm API 共享）
+
+/** 与前端约定的单条对话消息（仅 user / assistant 文本）。 */
+type ChatMessage = {
+  role: "user" | "assistant"; // 说话方
+  content: string; // 文本载荷
+};
+
+/** 长期记忆条目的重要程度：路由与压缩时优先保留 high。 */
+type MemoryImportance = "high" | "low"; // 二值重要性枚举
+
+/** 单条长期记忆：内容 + 重要性，替代早期单一的 longTerm 长字符串。 */
+type MemoryItem = {
+  content: string; // 事实或摘要正文
+  importance: MemoryImportance; // high 优先保留与路由参考
+};
+
+/**
+ * 服务端持有的完整记忆结构。
+ * - shortTerm：保留最近若干轮，供路由与最终回复感知当下语境；
+ * - items：带权重的长期事实列表（可由模型总结或规则抽取得到）。
+ */
+type Memory = {
+  shortTerm: ChatMessage[]; // 短期对话窗口
+  items: MemoryItem[]; // 长期结构化条目
+};
+
+/** 路由模型输出中的意图枚举（与前端展示类型一一对应）。 */
+type Action = "chat" | "weather" | "summary" | "todo"; // 四类业务动作
+
+/** 路由模型应输出的 JSON 形状（经 parseModelOutput 规范化）。 */
+type ParsedOutput = {
+  action: Action; // 归一化后的动作
+  /** 部分场景下作为工具输入的摘要文本（如聊天兜底）。 */
+  content: string; // 路由给出的正文或工具输入
+  /** 天气意图下的城市/地区关键词。 */
+  keyword: string; // 天气关键词
+};
+
+/** 待办卡片中单条任务。 */
+type TodoItem = {
+  task: string; // 任务描述
+  done: boolean; // 是否完成
+};
+
+/** 返回给前端的联合类型（含 memory）。 */
+/** 第17天：条件运算符（与 evaluateCondition 分支一一对应；类型主体在 workflow-types）。 */
+type WorkflowConditionOperator = "equals" | "includes" | "truthy"; // equals 精确匹配 judge.result；includes 子串；truthy 真值
+
+type ChatResponseBody =
+  | { type: "chat"; content: string; memory: Memory } // 聊天
+  | { type: "weather"; keyword: string; result: string; memory: Memory } // 天气
+  | { type: "summary"; text: string; memory: Memory } // 总结
+  | { type: "todo"; items: TodoItem[]; memory: Memory } // 待办
+  | {
+      type: "workflow"; // 多步骤工作流
+      workflow: Workflow; // 含 waiting_confirmation 等状态
+      finalSummary: string; // 最终答复或暂停说明
+      memory: Memory; // 记忆闭环
+      paused?: boolean; // 第18天：是否暂停待确认
+      waitingStepId?: string; // 第18天：待确认 stepId
+    }; // 多步骤工作流（HITL）
+
+/**
+ * 不含 memory 的响应负载。
+ * 单独拆出用于 withMemory 组装最终体，避免 TS 对 Omit<联合类型> 的收窄问题。
+ */
+type ChatResponsePayload =
+  | { type: "chat"; content: string } // 仅聊天字段
+  | { type: "weather"; keyword: string; result: string } // 仅天气字段
+  | { type: "summary"; text: string } // 仅总结字段
+  | { type: "todo"; items: TodoItem[] } // 仅待办字段
+  | {
+      type: "workflow"; // 工作流响应
+      workflow: Workflow; // 步骤与状态
+      finalSummary: string; // 汇总或暂停提示
+      paused?: boolean; // 第18天：true 表示 HITL 暂停，等待 confirm API
+      waitingStepId?: string; // 第18天：待确认步骤 id
+    }; // 工作流结果（含 HITL）
+
+/**
+ * 请求体中的 memory 字段：兼容 Day11 的 longTerm 字符串，也支持新结构的 items。
+ */
+type IncomingMemoryPayload = Partial<Memory> & { longTerm?: string }; // 可选旧 longTerm
+
+// ---------- 上下文与记忆体积限制 ----------
+
+/** 当 incoming messages 超过该条数时，较早部分会先被总结进长期记忆再丢弃出窗口。 */
+const MAX_CONTEXT_MESSAGES = 10; // 超过则压缩旧消息
+/** 短期窗口保留的最近消息条数（与 MAX_CONTEXT_MESSAGES 配合控制总量）。 */
+const SHORT_TERM_SIZE = 6; // 尾部保留条数
+/** 长期记忆条目序列化后的字符上限，超出时按重要性裁剪。 */
+const MAX_LONG_TERM_CHARS = 2000; // 长期字符上限
+/** 总字符数或条数超阈时触发二次「模型压缩」长期记忆。 */
+const SECONDARY_COMPRESS_THRESHOLD_CHARS = 500; // 触发二次压缩的字符阈值
+/** 二次压缩后最多保留的条目数。 */
+const MAX_COMPRESSED_ITEMS = 5; // 压缩输出条数上限
+
+// ---------- 模型后端：本地 Ollama / 小米 MiMo（OpenAI 兼容）----------
+
+const DEFAULT_OLLAMA_API_URL = "http://localhost:11434/api/chat"; // 默认 Ollama 聊天端点
+const DEFAULT_OLLAMA_MODEL = "qwen2.5:14b"; // 默认本地模型名
+/** 小米 MiMo OpenAI 兼容网关默认 origin（勿带末尾斜杠以外的多余路径，拼接 /chat/completions）。 */
+const DEFAULT_MIMO_BASE_URL = "https://token-plan-cn.xiaomimimo.com/v1";
+
+/** 请求体选的提供商：local=Ollama，mimo=小米兼容接口。 */
+type ModelProvider = "local" | "mimo";
+
+/**
+ * 单次请求内的模型运行时配置（由 env + 前端 provider / mimoModel 组装）。
+ * Key 仅来自服务端环境变量，绝不从前端传入。
+ */
+type ModelRuntime = {
+  provider: ModelProvider; // 当前走 Ollama 还是 MiMo
+  ollamaUrl: string; // 本地聊天 API 完整 URL
+  ollamaModel: string; // 本地模型名
+  mimoBaseUrl: string; // 小米网关 origin（不带路径尾巴）
+  mimoApiKey: string; // 小米 Bearer 密钥
+  mimoModel: string; // 小米模型 id
+};
+
+function isMimoModelId(id: string): id is MimoModelId {
+  return (MIMO_MODEL_IDS as readonly string[]).includes(id); // 判断 id 是否在白名单模型列表中
+}
+
+function normalizeApiBase(url: string): string {
+  return url.replace(/\/+$/, ""); // 去掉末尾多余斜杠，便于拼接 /chat/completions
+}
+
+/**
+ * 统一聊天补全：Ollama `/api/chat` 或 OpenAI 兼容 `POST /chat/completions`。
+ * 成功时 text 为助手正文；失败时 text 尽量携带上游错误文案。
+ */
+async function invokeChatModel(
+  rt: ModelRuntime,
+  messages: Array<{ role: string; content: string }>
+): Promise<{ ok: boolean; status: number; text: string }> {
+  if (rt.provider === "local") {
+    // 走本地 Ollama：请求体为 Ollama 原生 /api/chat 格式
+    const res = await fetch(rt.ollamaUrl, {
+      method: "POST", // HTTP 方法：POST JSON
+      headers: { "Content-Type": "application/json" }, // 声明 JSON 请求体
+      body: JSON.stringify({
+        model: rt.ollamaModel, // 本地要调用的模型名（如 qwen2.5:14b）
+        messages, // 与 OpenAI 风格兼容的消息数组（role + content）
+        stream: false, // 本路由统一非流式，便于一次性解析完整 JSON/文本
+      }), // 序列化请求体
+    }); // 发起 fetch 并等待响应
+    const rawText = await res.text(); // 无论成功失败先读整段文本，便于分支解析
+    let text = ""; // 最终抽取的助手正文或错误摘要
+    if (res.ok) {
+      // HTTP 2xx：按 Ollama 成功响应结构取 message.content
+      try {
+        const data = JSON.parse(rawText) as { message?: { content?: string } }; // Ollama 典型：{ message: { content } }
+        text = data.message?.content?.trim() || ""; // 安全链式读取并去掉首尾空白
+      } catch {
+        text = ""; // JSON 非法或结构不符时视为无正文
+      } // try/catch 结束
+    } else {
+      // HTTP 非 2xx：尽量从 Ollama error 字段取可读原因，否则截断原始响应
+      try {
+        const data = JSON.parse(rawText) as { error?: string }; // Ollama 错误常见为 { error: string }
+        text = (typeof data.error === "string" ? data.error : "") || rawText.slice(0, 800); // 优先 error，否则截断防日志过长
+      } catch {
+        text = rawText.slice(0, 800); // 非 JSON 错误页时直接截断原文
+      } // try/catch 结束
+    } // if (res.ok) 分支结束
+    return { ok: res.ok, status: res.status, text }; // 与 MiMo 分支统一返回三元组
+  } // local 分支结束
+
+  const base = normalizeApiBase(rt.mimoBaseUrl); // 规范化小米网关基址
+  const res = await fetch(`${base}/chat/completions`, {
+    // OpenAI 兼容聊天补全端点
+    method: "POST", // POST JSON
+    headers: {
+      "Content-Type": "application/json", // 声明 JSON 请求体
+      Authorization: `Bearer ${rt.mimoApiKey}`, // Bearer 鉴权头
+    },
+    body: JSON.stringify({
+      model: rt.mimoModel, // 前端选择的具体 MiMo 模型 id
+      messages, // 与 Ollama 侧相同的消息数组
+      stream: false, // 本接口走非流式一次性返回
+    }), // MiMo 请求体序列化结束
+  }); // fetch chat/completions 结束
+  const rawText = await res.text(); // 原始响应文本（成功/失败统一先读字符串）
+  let text = ""; // 解析出的助手正文或错误摘要
+  if (res.ok) {
+    // MiMo/OpenAI 成功：choices[0].message.content 为主文案
+    try {
+      const data = JSON.parse(rawText) as {
+        choices?: Array<{ message?: { content?: string } }>; // OpenAI 风格 choices
+      }; // 解析成功响应 JSON
+      text = data.choices?.[0]?.message?.content?.trim() || ""; // 取首条 choice 的 message.content
+    } catch {
+      text = ""; // JSON 异常则视为无正文
+    } // try/catch（成功分支）
+  } else {
+    // MiMo/OpenAI 错误：兼容 error 为对象或字符串
+    try {
+      const data = JSON.parse(rawText) as {
+        error?: { message?: string } | string; // 兼容对象或字符串 error
+      }; // 解析错误响应 JSON
+      if (typeof data.error === "object" && data.error?.message) {
+        text = data.error.message; // 读出 OpenAI 式 error.message
+      } else if (typeof data.error === "string") {
+        text = data.error; // 简单字符串错误
+      } else {
+        text = rawText.slice(0, 800); // 无法结构化则截取原始片段避免日志爆炸
+      } // if/else error 形态
+    } catch {
+      text = rawText.slice(0, 800); // 解析失败同样截取正文
+    } // try/catch（错误分支）
+  } // if (res.ok) MiMo
+  return { ok: res.ok, status: res.status, text }; // 与 local 分支统一返回形状
+} // invokeChatModel 函数结束
+
+// ---------- 规则抽取 / 重要性推断用的正则 ----------
+
+/** 匹配用户话术中「值得写入长期记忆」的自我介绍、目标等句式。 */
+const LONG_TERM_RULE_PATTERN = /(我叫|我的名字是|叫我|我是|我想|我的目标|我希望|偏好|习惯)/; // 规则记忆触发
+/** 用于推断 importance=high 的关键词（身份、规划类）。 */
+const HIGH_IMPORTANCE_PATTERN =
+  /(我叫|我的名字|我是|我想|我的目标|我希望|长期|计划|转型|职业|岗位)/; // 高重要线索
+/** 闲聊语气词：倾向于标为 low 或在压缩时丢弃。 */
+const LOW_CHITCHAT_PATTERN = /(哈哈|呵呵|谢谢|好的|嗯嗯|随便聊聊|今天天气不错)/; // 低重要闲聊
+
+/** 演示用城市 → 经纬度，供 Open-Meteo 查询；未列入的城市会提示不支持。 */
+const cityMap: Record<string, { lat: number; lon: number }> = {
+  北京: { lat: 39.9042, lon: 116.4074 }, // 北京坐标
+  上海: { lat: 31.2304, lon: 121.4737 }, // 上海坐标
+};
+
+/** 结构化日志，便于在服务端排查路由与耗时。 */
+function logAgent(event: string, payload: Record<string, unknown>) {
+  console.log(`[Agent] ${event}`, payload); // 打印事件名与负载
+}
+
+/** Workflow 专用日志（含每步耗时）。 */
+function logWorkflow(
+  event: "start" | "step" | "done" | "error",
+  payload: Record<string, unknown>
+) {
+  console.log(`[Workflow] ${event}`, payload); // 打印工作流阶段与结构化负载
+}
+
+/** 将模型输出的 action 字符串收敛到本服务支持的四种之一（含 search→weather 别名）。 */
+function normalizeAction(raw: unknown): Action {
+  if (raw === "weather" || raw === "search") return "weather"; // 天气别名统一
+  if (raw === "summary") return "summary"; // 总结
+  if (raw === "todo") return "todo"; // 待办
+  return "chat"; // 默认聊天
+}
+
+/** Planner 输出的 action：含 judge（第17天）与四类工具，不含 workflow。 */
+function normalizeWorkflowAction(raw: unknown): WorkflowStepAction {
+  if (raw === "weather" || raw === "search") return "weather"; // 天气与 search 别名统一为 weather
+  if (raw === "summary") return "summary"; // 总结步骤
+  if (raw === "todo") return "todo"; // 待办生成步骤
+  if (raw === "judge") return "judge"; // 第17天：结构化判断节点
+  return "chat"; // 默认走普通对话
+}
+
+/**
+ * 将任意 JSON 对象规范为 ParsedOutput；字段缺失或类型不对时使用安全默认值。
+ * rawText 用于在完全无法解析时把原始文本塞进 content（便于走 chat 兜底）。
+ */
+function normalizeParsedOutput(input: unknown, rawText: string): ParsedOutput {
+  if (!input || typeof input !== "object") {
+    return { action: "chat", content: rawText, keyword: "" }; // 非对象则全文当聊天
+  }
+  const candidate = input as Partial<ParsedOutput>; // 宽松读取字段
+  return {
+    action: normalizeAction(candidate.action), // 归一化 action
+    content:
+      typeof candidate.content === "string" && candidate.content.trim()
+        ? candidate.content.trim() // 有正文则修剪
+        : "", // 否则空串
+    keyword: typeof candidate.keyword === "string" ? candidate.keyword.trim() : "", // keyword 仅字符串
+  }; // 返回 ParsedOutput
+}
+
+/**
+ * 解析路由模型的文本输出：优先整段 JSON.parse；失败则尝试提取首个 {...} 子串再解析；
+ * 仍失败则视为普通文本，action 固定为 chat。
+ */
+function parseModelOutput(modelOutput: string): ParsedOutput {
+  try {
+    return normalizeParsedOutput(JSON.parse(modelOutput), modelOutput); // 整段 JSON
+  } catch {
+    const jsonMatch = modelOutput.match(/\{[\s\S]*\}/); // 提取花括号片段
+    if (jsonMatch) {
+      try {
+        return normalizeParsedOutput(JSON.parse(jsonMatch[0]), modelOutput); // 子串解析
+      } catch {
+        // ignore // 子串仍非法则继续兜底
+      }
+    }
+    return { action: "chat", content: modelOutput, keyword: "" }; // 全文当聊天内容
+  }
+}
+
+/** 去掉 Markdown 列表前缀「- 」并 trim，便于把多行字符串拆成记忆条目。 */
+function normalizeContentLine(line: string): string {
+  return line.replace(/^\s*-\s*/, "").trim(); // 去项目符号与空白
+}
+
+/** 无结构化 importance 时，用启发式正则猜测 high / low。 */
+function inferImportanceFromText(text: string): MemoryImportance {
+  const t = text.trim(); // 修剪输入
+  if (HIGH_IMPORTANCE_PATTERN.test(t)) return "high"; // 命中高重要模式
+  if (LOW_CHITCHAT_PATTERN.test(t)) return "low"; // 命中闲聊模式
+  return "low"; // 默认低重要
+}
+
+/** 将旧版「单字符串 longTerm」按行拆成多条干净文本。 */
+function splitMemoryLines(longTerm: string): string[] {
+  return longTerm
+    .split("\n") // 按行拆
+    .map((line) => normalizeContentLine(line)) // 每行规范化
+    .filter(Boolean); // 去空行
+}
+
+/** 估算当前长期条目占用的总字符数（用于判断是否触发压缩）。 */
+function memoryItemsCharLength(items: MemoryItem[]): number {
+  return items.reduce((sum, i) => sum + i.content.length, 0); // 累加每条 content 长度
+}
+
+/**
+ * 在不超过 MAX_LONG_TERM_CHARS 的前提下尽量保留更多条目：
+ * 先保留全部 high，再按顺序尝试加入 low；仍超长则粗暴截取末尾若干条。
+ */
+function trimMemoryItems(items: MemoryItem[]): MemoryItem[] {
+  let joined = items.map((i) => `- ${i.content}`).join("\n"); // 序列化估算长度
+  if (joined.length <= MAX_LONG_TERM_CHARS) return items; // 未超限直接返回
+  const high = items.filter((i) => i.importance === "high"); // 高重要子集
+  const low = items.filter((i) => i.importance === "low"); // 低重要子集
+  let kept = [...high]; // 先放入全部 high
+  for (const item of low) {
+    const trial = [...kept, item]; // 尝试追加一条 low
+    const s = trial.map((i) => `- ${i.content}`).join("\n"); // 试算长度
+    if (s.length <= MAX_LONG_TERM_CHARS) kept = trial; // 未超限则接受
+    else break; // 否则停止尝试更多 low
+  }
+  joined = kept.map((i) => `- ${i.content}`).join("\n"); // 重新序列化 kept
+  if (joined.length <= MAX_LONG_TERM_CHARS) return kept; // 若已在限额内则返回
+  return kept.slice(-Math.ceil(MAX_LONG_TERM_CHARS / 40)); // 否则粗暴保留尾部若干条
+}
+
+/**
+ * 按内容（忽略大小写）去重；若同一内容既有 low 又有 high，保留 high。
+ */
+function dedupeMemoryItems(items: MemoryItem[]): MemoryItem[] {
+  const map = new Map<string, MemoryItem>(); // 小写内容 -> 条目
+  for (const item of items) {
+    const key = item.content.trim().toLowerCase(); // 去重键
+    const prev = map.get(key); // 已存在条目
+    if (!prev || (prev.importance === "low" && item.importance === "high")) {
+      map.set(key, item); // 覆盖或首次写入
+    }
+  }
+  return Array.from(map.values()); // Map 转数组
+}
+
+/** 合并新旧长期条目后去重并按体积裁剪。 */
+function appendMemoryItems(base: MemoryItem[], additions: MemoryItem[]): MemoryItem[] {
+  return trimMemoryItems(dedupeMemoryItems([...base, ...additions])); // 合并→去重→裁剪
+}
+
+/**
+ * 统一入口：优先读请求里的 items 数组；否则把 longTerm 字符串拆行并推断每条 importance。
+ */
+function normalizeIncomingMemoryPayload(payload?: IncomingMemoryPayload): MemoryItem[] {
+  if (payload?.items && Array.isArray(payload.items)) {
+    return payload.items
+      .filter((i) => i && typeof i.content === "string" && i.content.trim()) // 过滤无效项
+      .map((i) => ({
+        content: i.content.trim(), // 修剪正文
+        importance: i.importance === "high" ? "high" : "low", // 归一 importance
+      })); // 映射为 MemoryItem
+  }
+  if (payload?.longTerm && typeof payload.longTerm === "string") {
+    return splitMemoryLines(payload.longTerm).map((line) => ({
+      content: line, // 每行一条
+      importance: inferImportanceFromText(line), // 启发式重要度
+    })); // 旧 longTerm 兼容
+  }
+  return []; // 无 payload 则空数组
+}
+
+/**
+ * 将多条 MemoryItem 格式化为「- 内容」拼接块；可指定只输出某一 importance。
+ */
+function formatMemoryBlock(items: MemoryItem[], importance?: MemoryImportance): string {
+  const filtered =
+    importance !== undefined ? items.filter((i) => i.importance === importance) : items; // 可选过滤
+  if (filtered.length === 0) return ""; // 无内容返回空串
+  return filtered.map((i) => `- ${i.content}`).join("\n"); // 拼接 markdown 行块
+}
+
+/** 为 Planner 注入长期记忆（用 items 替代文档中的 longTerm 字段）。 */
+function formatMemoryForPlanner(memory: Memory): string {
+  const highBlock = formatMemoryBlock(memory.items, "high"); // 高优先级记忆块（身份/目标等）
+  const lowBlock = formatMemoryBlock(memory.items, "low"); // 低优先级记忆块
+  if (!highBlock && !lowBlock) return "(空)"; // 无任何长期记忆时返回占位说明
+  return [
+    highBlock ? `【高优先级记忆】\n${highBlock}` : "", // 有则注入高优区块
+    lowBlock ? `【其他记忆】\n${lowBlock}` : "", // 有则注入其他区块
+  ]
+    .filter(Boolean) // 去掉空串避免多余换行
+    .join("\n\n"); // 两段之间空一行拼接
+}
+
+/**
+ * 构造「只做路由、不直接闲聊」的 system 提示词：要求模型仅输出一行 JSON。
+ * 其中注入高/低优先级记忆块，便于识别省略语与「继续上次」类指令。
+ */
+function buildRoutingSystemPrompt(memory: Memory): string {
+  const highBlock = formatMemoryBlock(memory.items, "high"); // 高优先级记忆文本块
+  const lowBlock = formatMemoryBlock(memory.items, "low"); // 低优先级记忆文本块
+  return `
+你是一个路由助手，必须严格输出 JSON，不允许输出解释或 Markdown。
+你必须结合「用户最新一轮输入」与下列「长期记忆」判断意图；省略语（如继续刚才的任务）必须依赖记忆补全语义。
+
+【高优先级记忆】（身份/目标/偏好，路由时优先参考）
+${highBlock || "(空)"}
+
+【其他记忆】
+${lowBlock || "(空)"}
+
+任务（按意图选择 action）：
+1) 用户问天气、气温、某城市天气 -> "weather"
+2) 用户要总结、概括、归纳 -> "summary"
+3) 用户要做计划、列待办、任务清单、或表达「继续刚才的待办/按上次计划」且记忆中存在目标/任务语境 -> "todo"
+4) 普通闲聊 -> "chat"
+
+特殊规则：
+- 若用户说「继续/刚才/上次/那个任务/按计划/接着」且需要延续计划或任务拆解 -> 优先 "todo"
+- 若用户明确要延续上文归纳、要点汇总 -> 优先 "summary"
+- keyword：weather 时填城市或地区关键词；其它可为空
+
+输出格式（仅一行 JSON）：
+{"action":"chat|weather|summary|todo","content":"","keyword":""}
+`.trim(); // 去掉首尾空白
+}
+
+/** 判断用户是否在用语境衔接词，需要结合记忆猜测真实意图。 */
+const CONTINUATION_PATTERN = /继续|刚才|刚刚|上次|那个任务|按计划|接着|再来|跟上文|刚才那个/; // 延续话术
+
+function isContinuationQuery(text: string): boolean {
+  return CONTINUATION_PATTERN.test(text); // 是否命中延续模式
+}
+
+/**
+ * 当路由模型仍返回 chat，但用户话术像「继续」且记忆中存在总结/待办语境时，
+ * 强制升级为 summary 或 todo，减少误路由为闲聊。
+ */
+function resolveContinuationAction(latestUser: string, parsed: ParsedOutput, memory: Memory): Action {
+  if (parsed.action !== "chat") return parsed.action; // 已非 chat 则不覆盖
+  if (!isContinuationQuery(latestUser)) return parsed.action; // 非延续询问则不覆盖
+
+  const memAll = memory.items.map((i) => i.content).join("\n"); // 全部记忆拼串
+  const high = formatMemoryBlock(memory.items, "high"); // 高优先级记忆文本，用于检测任务/目标语境
+
+  if (/总结|归纳|要点|摘要|上文/.test(latestUser)) return "summary"; // 用户明确总结词
+  if (/待办|任务清单|清单|计划|todo/i.test(latestUser)) return "todo"; // 用户明确待办词
+
+  if (/总结|归纳|要点/.test(memAll) && !/待办|任务|清单/.test(memAll)) return "summary"; // 记忆偏总结
+  if (/待办|任务|清单|计划|目标/.test(high) || /待办|任务/.test(memAll)) return "todo"; // 记忆偏任务
+
+  return "todo"; // 默认偏向待办延续
+}
+
+/**
+ * 长期记忆过多时，用单独一轮模型调用把多条事实压缩成少量核心条目（仍带 importance）。
+ * 请求失败则退化为去重 + trim 后截断。
+ */
+async function secondaryCompressItems(
+  items: MemoryItem[],
+  rt: ModelRuntime
+): Promise<MemoryItem[]> {
+  if (items.length === 0) return items; // 空则直接返回
+  const existingHigh = formatMemoryBlock(items, "high"); // 原文高优先级块供模型保留语义
+  const prompt = `
+你是记忆压缩器。将下列记忆合并压缩为最多 ${MAX_COMPRESSED_ITEMS} 条核心事实。
+要求：
+1. 仅保留身份/目标/偏好/长期约束/关键任务方向
+2. 去除重复与闲聊
+3. 输出 JSON 数组，每项格式 {"content":"...","importance":"high"|"low"}
+4. importance：身份/目标/长期计划为 high，其余为 low
+5. 不要输出其它文字
+
+高优先级原文（含义必须尽量保留）：
+${existingHigh || "(无)"}
+
+全部记忆条目：
+${items.map((i) => `- ${i.content} [${i.importance}]`).join("\n")}
+`; // 压缩提示词
+  const { ok, text: raw } = await invokeChatModel(rt, [{ role: "user", content: prompt }]); // 调用模型压缩
+  if (!ok) return trimMemoryItems(dedupeMemoryItems(items)).slice(0, MAX_COMPRESSED_ITEMS); // 失败则退化截断
+  try {
+    const parsed = JSON.parse(raw.match(/\[[\s\S]*\]/)?.[0] || raw) as unknown; // 抽取数组 JSON
+    if (!Array.isArray(parsed)) throw new Error("invalid"); // 非数组则失败
+    const out: MemoryItem[] = []; // 输出缓冲
+    for (const row of parsed) {
+      if (!row || typeof row !== "object") continue; // 跳过非法行
+      const content = String((row as { content?: unknown }).content || "").trim(); // 读 content
+      const importance =
+        (row as { importance?: unknown }).importance === "high" ? "high" : "low"; // 读 importance
+      if (content) out.push({ content, importance }); // 非空则收集
+    }
+    const deduped = dedupeMemoryItems(out); // 去重
+    return deduped.slice(0, MAX_COMPRESSED_ITEMS); // 限制条数
+  } catch {
+    const lines = splitMemoryLines(raw).slice(0, MAX_COMPRESSED_ITEMS); // 解析失败则按行拆
+    return lines.map((line) => ({
+      content: line, // 行内容
+      importance: inferImportanceFromText(line), // 推断重要度
+    })); // 转为 MemoryItem
+  }
+}
+
+/** 根据体积阈值决定是否触发 secondaryCompressItems，并最终 trim。 */
+async function maybeEvolveMemoryItems(
+  items: MemoryItem[],
+  rt: ModelRuntime
+): Promise<MemoryItem[]> {
+  let next = dedupeMemoryItems(items); // 先去重
+  const charLen = memoryItemsCharLength(next); // 当前字符总长
+  if (charLen >= SECONDARY_COMPRESS_THRESHOLD_CHARS || next.length > 12) {
+    next = await secondaryCompressItems(next, rt); // 超阈则二次压缩
+  }
+  return trimMemoryItems(next); // 最后裁剪体积
+}
+
+/**
+ * 将被移出短期窗口的旧对话压缩成若干 MemoryItem，合并进长期记忆。
+ * 用于在消息很长时把关键信息「沉淀」下来而不是直接丢弃。
+ */
+async function summarizeForMemory(
+  oldMessages: ChatMessage[],
+  existingItems: MemoryItem[],
+  rt: ModelRuntime
+): Promise<MemoryItem[]> {
+  const dialogue = oldMessages
+    .map((m) => `${m.role === "user" ? "用户" : "助手"}: ${m.content}`) // 格式化每轮
+    .join("\n"); // 拼成对话文本
+
+  const existingText = formatMemoryBlock(existingItems); // 已有长期条目文本块
+
+  const prompt = `
+请总结对话，用于长期记忆：
+
+要求：
+1. 只保留关键信息（身份 / 目标 / 偏好 / 约束）
+2. 删除闲聊内容
+3. 输出 JSON 数组，每项 {"content":"...","importance":"high"|"low"}
+4. importance：身份/目标/偏好/长期约束为 high，否则 low
+5. 不要重复已有事实
+
+已有长期记忆：
+${existingText || "(空)"}
+
+待压缩对话：
+${dialogue}
+`; // 压缩旧对话的提示词
+
+  const { ok, text: raw } = await invokeChatModel(rt, [{ role: "user", content: prompt }]); // 请求模型输出 JSON 数组
+  if (!ok) return []; // 失败返回空，由上层忽略
+  try {
+    const parsed = JSON.parse(raw.match(/\[[\s\S]*\]/)?.[0] || raw) as unknown; // 尝试解析数组
+    if (!Array.isArray(parsed)) return []; // 非数组则空
+    const out: MemoryItem[] = []; // 收集结果
+    for (const row of parsed) {
+      if (!row || typeof row !== "object") continue; // 跳过非法项
+      const content = String((row as { content?: unknown }).content || "").trim(); // content
+      const importance =
+        (row as { importance?: unknown }).importance === "high" ? "high" : "low"; // importance
+      if (content) out.push({ content, importance }); // 收集
+    }
+    return out; // 返回结构化条目
+  } catch {
+    const lines = splitMemoryLines(raw); // JSON 失败则按行拆
+    return lines.map((line) => ({
+      content: line, // 行文本
+      importance: inferImportanceFromText(line), // 推断重要度
+    })); // 降级为行级 MemoryItem
+  }
+}
+
+/**
+ * 不调用模型：仅用正则从用户话术中抓取「自我介绍/目标」类句子，标记为 high。
+ */
+function extractRuleBasedMemory(messages: ChatMessage[]): MemoryItem[] {
+  return messages
+    .filter((m) => m.role === "user" && LONG_TERM_RULE_PATTERN.test(m.content)) // 仅用户且命中规则
+    .map((m) => ({
+      content: m.content.trim(), // 原文trim
+      importance: "high" as MemoryImportance, // 规则命中视为高重要
+    })); // 映射为条目
+}
+
+/**
+ * 核心记忆管线：归一化入参 → 可选总结旧消息 → 规则抽取 → 可能二次压缩 →
+ * 产出 Memory 与喂给后续聊天/路由用的 modelMessages（system 记忆块 + shortTerm）。
+ */
+async function buildMemory(
+  incomingMessages: ChatMessage[],
+  incomingMemory: IncomingMemoryPayload | undefined,
+  rt: ModelRuntime
+): Promise<{ memory: Memory; modelMessages: Array<{ role: string; content: string }> }> {
+  let items = normalizeIncomingMemoryPayload(incomingMemory); // 解析入参记忆
+
+  const shouldSummarize = incomingMessages.length > MAX_CONTEXT_MESSAGES; // 是否需压缩旧段
+  const shortTerm = incomingMessages.slice(-SHORT_TERM_SIZE); // 保留尾部短期
+  const oldMessages = shouldSummarize ? incomingMessages.slice(0, -SHORT_TERM_SIZE) : []; // 旧段待总结
+
+  if (oldMessages.length > 0) {
+    const summarized = await summarizeForMemory(oldMessages, items, rt); // 异步总结旧消息为条目
+    items = appendMemoryItems(items, summarized); // 合并进长期
+  }
+
+  items = appendMemoryItems(items, extractRuleBasedMemory(incomingMessages)); // 合并规则抽取
+  items = await maybeEvolveMemoryItems(items, rt); // 可能二次压缩并裁剪
+
+  const memory: Memory = { shortTerm, items }; // 组装 Memory
+
+  const highText = formatMemoryBlock(memory.items, "high"); // 高优先级块字符串
+  const lowText = formatMemoryBlock(memory.items, "low"); // 低优先级块字符串
+  const modelMessages: Array<{ role: string; content: string }> = []; // 模型消息数组
+  if (highText || lowText) {
+    modelMessages.push({
+      role: "system", // system 注入长期记忆
+      content: [
+        highText ? `【高优先级长期记忆】\n${highText}` : "", // 高块
+        lowText ? `【其他长期记忆】\n${lowText}` : "", // 低块
+      ]
+        .filter(Boolean) // 去掉空串
+        .join("\n\n"), // 合并为一条 system
+    }); // push system
+  }
+  modelMessages.push(...memory.shortTerm); // 追加短期对话
+  return { memory, modelMessages }; // 返回记忆与模型输入
+}
+
+/**
+ * 从用户或 keyword 字段里解析城市名：先完整匹配 cityMap 键，再对清理后的串做子串匹配。
+ */
+function extractWeatherCity(text: string): string {
+  const trimmed = text.trim(); // 修剪
+  if (!trimmed) return ""; // 空则空城市
+  for (const city of Object.keys(cityMap)) {
+    if (trimmed.includes(city)) return city; // 原文包含城市名
+  }
+  const cleaned = trimmed
+    .replace(/[，。！？、,.!?]/g, "") // 去标点
+    .replace(/\s+/g, "") // 去空白
+    .replace(/帮我|请|一下|查一下|查下|查一查|查|查询|搜索/g, "") // 去查询动词
+    .replace(/天气预报|天气情况|天气|温度|气温/g, "") // 去天气关键词
+    .replace(/的/g, ""); // 去「的」
+  for (const city of Object.keys(cityMap)) {
+    if (cleaned.includes(city)) return city; // 清洗后再匹配
+  }
+  return cleaned; // 返回清洗串供错误提示
+}
+
+/** 取最近一条 user 消息的文本，供路由与工具缺省输入使用。 */
+function getLatestUserText(messages: ChatMessage[]): string {
+  return [...messages].reverse().find((m) => m.role === "user")?.content?.trim() || ""; // 逆序找 user
+}
+
+/**
+ * 当路由把 action 判为 chat 但 content 为空时，用完整 modelMessages 再走一轮普通对话。
+ */
+async function generateFallbackChat(
+  messages: Array<{ role: string; content: string }>,
+  rt: ModelRuntime
+): Promise<string> {
+  const { ok, text } = await invokeChatModel(rt, [
+    {
+      role: "system", // 第二轮聊天人设
+      content: "你是一个简洁、友好的中文助手。请直接回答用户，不要输出 JSON。", // 禁止 JSON
+    },
+    ...messages, // 带上完整上下文（含 system 记忆块）
+  ]); // 调用模型
+  if (!ok) return "抱歉，我现在暂时无法正常回答，请稍后再试。"; // HTTP 失败
+  return text || "抱歉，我现在暂时无法正常回答，请稍后再试。"; // 空内容兜底
+}
+
+/** 总结工具：取最近若干轮对话拼成文本；若无则退回路由给出的 fallback。 */
+function pickSummaryContext(messages: ChatMessage[], fallbackText: string): string {
+  const recent = messages.slice(-6); // 最近 6 条
+  const context = recent
+    .map((m) => `${m.role === "user" ? "用户" : "助手"}: ${m.content}`) // 角色前缀
+    .join("\n"); // 多行文本
+  return context || fallbackText; // 空则用 fallback
+}
+
+/** summary 分支：按固定格式生成要点列表，并注入高优先级记忆作为目标参考。 */
+async function summarizeWithModel(
+  messages: ChatMessage[],
+  fallbackText: string,
+  memory: Memory,
+  rt: ModelRuntime,
+  chainPrefix?: string
+) {
+  let content = pickSummaryContext(messages, fallbackText); // 选定总结输入
+  if (chainPrefix) {
+    content = `${chainPrefix}\n\n${content}`; // 工作流场景：把前置步骤输出拼在对话上下文前
+  }
+  const memHint = formatMemoryBlock(memory.items, "high"); // 高优先级记忆提示
+  const prompt = `
+请总结以下对话，要求：
+1. 提取关键信息
+2. 用 3-5 条要点表达
+3. 输出格式为纯文本项目符号，每行以"- "开头
+4. 最后一行给出"结论："和"下一步："
+5. 可参考用户长期目标（若有）：
+${memHint || "(无)"}
+
+对话：
+${content}
+`; // 总结提示词
+  const { ok, text } = await invokeChatModel(rt, [{ role: "user", content: prompt }]); // 调用模型
+  if (!ok) {
+    return "总结失败：模型暂时不可用，请稍后重试。"; // 模型不可用
+  }
+  return text || "总结失败：未获取到有效结果。"; // 空正文兜底
+}
+
+/** 尝试把模型输出解析为 TodoItem[]（严格 JSON 数组）；失败返回 null。 */
+function parseTodoItemsFromText(raw: string): TodoItem[] | null {
+  try {
+    const parsed = JSON.parse(raw); // 解析 JSON
+    if (!Array.isArray(parsed)) return null; // 非数组失败
+    const todos = parsed
+      .map((item) => {
+        if (!item || typeof item !== "object") return null; // 跳过非对象
+        const task =
+          typeof (item as { task?: unknown }).task === "string"
+            ? (item as { task: string }).task.trim() // task 字符串
+            : ""; // 否则空
+        const done = Boolean((item as { done?: unknown }).done); // done 布尔化
+        if (!task) return null; // 无 task 丢弃
+        return { task, done }; // 合法 TodoItem
+      })
+      .filter((v): v is TodoItem => Boolean(v)); // 过滤 null
+    return todos.length > 0 ? todos : null; // 无有效项则 null
+  } catch {
+    return null; // 解析异常
+  }
+}
+
+/**
+ * todo 分支：结合用户当前输入与长期记忆生成个性化任务列表；
+ * 解析失败时使用内置占位任务，保证前端总能渲染出列表。
+ */
+async function generateTodosWithModel(args: {
+  userInput: string;
+  memory: Memory;
+  rt: ModelRuntime;
+  /** 非依赖模式下的线性前置输出（无前述 dependsOn 时使用）。 */
+  chainPrefix?: string;
+  /** 显式 dependsOn：与 chainPrefix 二选一优先；prompt 采用「依赖结果 + 当前任务」结构。 */
+  dependencyContext?: string;
+}): Promise<TodoItem[]> {
+  const { userInput, memory, chainPrefix, dependencyContext, rt } = args; // 解构参数
+  const highBlock = formatMemoryBlock(memory.items, "high"); // 高优先级记忆块
+  const lowBlock = formatMemoryBlock(memory.items, "low"); // 其他记忆块
+
+  const dep = dependencyContext?.trim(); // 显式依赖链上下文：来自 dependsOn 步骤的成功输出拼接
+  const linear = !dep && chainPrefix?.trim() ? chainPrefix.trim() : ""; // 无依赖时：用线性前置步骤输出作弱上下文
+
+  const workflowBlock =
+    dep
+      ? `请基于以下内容生成待办（必须结合依赖步骤结果）：\n\n【依赖步骤结果】\n${dep}\n\n【当前任务】\n${userInput}\n` // 依赖模式：把依赖结果与用户本步任务一并写进提示
+      : linear
+        ? `\n【前置步骤输出】\n${linear}\n\n` // 线性模式：仅追加「前置输出」段，结构较松
+        : ""; // 既无依赖也无前置：不注入额外工作流块
+
+  const prompt = dep
+    ? `
+${workflowBlock}
+要求：
+1. 返回 JSON 数组
+2. 每项包含 task 和 done
+3. done 默认为 false
+4. 至少返回 3 项；待办须紧密承接「依赖步骤结果」与「当前任务」，避免与上文无关的通用模板
+5. 不要输出任何解释
+
+【高优先级记忆】
+${highBlock || "(空)"}
+
+【其他记忆】
+${lowBlock || "(空)"}
+`.trim()
+    : `
+请根据用户输入与长期记忆生成个性化待办事项。
+要求：
+1. 返回 JSON 数组
+2. 每项包含 task 和 done
+3. done 默认为 false
+4. 至少返回 3 项；内容须体现用户的身份/目标（若有），避免通用空话模板
+5. 不要输出任何解释
+
+【高优先级记忆】
+${highBlock || "(空)"}
+
+【其他记忆】
+${lowBlock || "(空)"}
+${workflowBlock}用户输入：
+${userInput}
+`; // 待办生成提示词；依赖模式用独立结构，否则沿用线性前置段
+  const { ok, text: raw } = await invokeChatModel(rt, [{ role: "user", content: prompt }]); // 请求模型
+  if (!ok) {
+    return [
+      { task: "对照记忆澄清本周目标与交付物", done: false }, // 占位 1
+      { task: "拆解关键任务并设定验收标准", done: false }, // 占位 2
+      { task: "执行并复盘，更新进度", done: false }, // 占位 3
+    ]; // 失败静态列表
+  }
+  const fromDirect = parseTodoItemsFromText(raw); // 整体 JSON 解析
+  if (fromDirect) return fromDirect; // 成功则返回
+
+  const wrapped = raw.match(/\[[\s\S]*\]/)?.[0]; // 抽取数组子串
+  const fromWrapped = wrapped ? parseTodoItemsFromText(wrapped) : null; // 子串解析
+  if (fromWrapped) return fromWrapped; // 成功则返回
+
+  return [
+    { task: "结合记忆细化当前优先事项", done: false }, // 二级兜底 1
+    { task: "推进主线任务并记录阻塞点", done: false }, // 二级兜底 2
+    { task: "阶段性复盘并调整后续步骤", done: false }, // 二级兜底 3
+  ]; // 最终静态兜底
+}
+
+/** 工作流 action 白名单集合（必须与 executeWorkflow switch 分支一致）。 */
+const WORKFLOW_ALLOWED_ACTIONS: ReadonlySet<WorkflowStepAction> = new Set([
+  "chat", // 普通对话分支
+  "summary", // 归纳总结分支
+  "todo", // 待办生成分支
+  "weather", // 固定城市天气查询分支
+  "judge", // 第17天：判断分支用的结构化输出动作
+]); // WORKFLOW_ALLOWED_ACTIONS 常量结束
+
+/** 第15天：当步骤本体未给出 retry 字段时采用的默认「失败后可追加尝试次数」（不含首轮）。 */
+export const WORKFLOW_DEFAULT_STEP_RETRIES = 2; // 等价于首轮 + 最多 2 次重试，共 3 次机会（confirm 续跑复用）
+
+/** Planner 输出的单步草案（可为每步提供稳定 id 与依赖 id 列表）。 */
+type PlannerPlanItem = {
+  /** Planner 可选输出；缺省时由服务端分配 step-1 / step-2… */
+  id?: string;
+  name: string; // 步骤展示名
+  action: WorkflowStepAction; // 工具枚举
+  input: string; // 送入工具的字符串（已由 normalizePlannerStepInput 规范）
+  /** 需要其输出的前置步骤 id（与 WorkflowStep.id 对齐）。 */
+  dependsOn?: string[];
+  /** 第17天：可选条件分支约束（相对 fromStepId 的输出）。 */
+  condition?: WorkflowStepCondition; // undefined：无条件步骤
+  /** 第18天：执行前是否需用户确认（HITL）。 */
+  requiresConfirmation?: boolean; // true 时 Executor 在调用模型前暂停
+  /** 第18天：展示给用户的确认文案。 */
+  confirmationMessage?: string; // requiresConfirmation 时应非空（可 repair）
+};
+
+/** finalizePlannerPlanItems 之后每条步骤均有稳定 id（用于 dependsOn）。 */
+type FinalizedPlannerPlanItem = Omit<PlannerPlanItem, "id"> & { id: string };
+
+/**
+ * Planner 有时会把 input 写成对象（如 { city: "北京" }）；直接 String(obj) 会得到 "[object Object]"。
+ * 这里优先抽取常见字段，否则 JSON 序列化，保证下游天气解析与前端展示可读。
+ */
+function normalizePlannerStepInput(raw: unknown): string {
+  if (raw == null) return ""; // null/undefined 视为无输入
+  if (typeof raw === "string") return raw.trim(); // 字符串直接裁剪空白
+  if (typeof raw === "number" || typeof raw === "boolean") return String(raw); // 标量转成可读字符串
+  if (Array.isArray(raw)) {
+    try {
+      return JSON.stringify(raw); // 数组整体 JSON 化，避免 [object Object]
+    } catch {
+      return ""; // 序列化失败则空串
+    }
+  }
+  if (typeof raw === "object") {
+    const o = raw as Record<string, unknown>; // 断言为字典便于按键取值
+    const preferKeys = [
+      // 常见「自然语言入口」字段名，优先抽到可展示/可传给工具的字符串
+      "city",
+      "location",
+      "place",
+      "keyword",
+      "query",
+      "content",
+      "text",
+      "prompt",
+      "input",
+      "description",
+    ];
+    for (const key of preferKeys) {
+      const v = o[key]; // 读取候选键对应的值
+      if (typeof v === "string" && v.trim()) return v.trim(); // 首个非空字符串即作为步骤 input
+    }
+    try {
+      return JSON.stringify(o); // 无常见键则整体 JSON（仍优于 [object Object]）
+    } catch {
+      return ""; // stringify 异常则退回空
+    }
+  }
+  return String(raw).trim(); // 其余类型统一 toString 再 trim
+}
+
+/** 第17天：把 Planner 任意对象解析为 WorkflowStepCondition（字段不合法则返回 undefined）。 */
+function parseWorkflowConditionFromUnknown(raw: unknown): WorkflowStepCondition | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined; // 仅接受「非数组对象」作为 condition 载体
+  const o = raw as Record<string, unknown>; // 以字典方式读取 Planner JSON 片段
+  const fromStepId = typeof o.fromStepId === "string" ? o.fromStepId.trim() : ""; // fromStepId：必须是 Trim 后非空字符串才有意义
+  const opRaw = o.operator; // operator：原始字段（可能是字符串也可能是缺失）
+  const operator =
+    opRaw === "equals" || opRaw === "includes" || opRaw === "truthy" ? opRaw : undefined; // 收窄到三类合法运算符
+  const value = typeof o.value === "string" ? o.value : ""; // value：统一成字符串（缺失则空串）
+  if (!fromStepId || !operator) return undefined; // fromStepId 与 operator 任一缺失都无法构造可靠条件
+  if ((operator === "equals" || operator === "includes") && !value.trim()) return undefined; // equals/includes：必须有非空 value（避免误判）
+  return { fromStepId, operator, value }; // 返回结构化 condition：供 finalize 与 validate 消费
+} // parseWorkflowConditionFromUnknown 结束
+
+/** 解析 Planner 返回的 JSON 数组（允许多级容错）。 */
+function parsePlannerPlanOutput(modelOutput: string): PlannerPlanItem[] {
+  try {
+    const parsed = JSON.parse(modelOutput) as unknown; // 尝试整段解析为 JSON
+    if (!Array.isArray(parsed)) return []; // 非数组失败
+    const out: PlannerPlanItem[] = []; // 累积合法步骤
+    for (const row of parsed) {
+      if (!row || typeof row !== "object") continue; // 跳过非法元素
+      const idRaw = (row as { id?: unknown }).id; // Planner 可选提供的步骤 id（原始未知类型）
+      const idCandidate = typeof idRaw === "string" && idRaw.trim() ? idRaw.trim() : undefined; // 仅非空字符串才采纳，否则留 undefined 待 finalize 补全
+      const depRaw = (row as { dependsOn?: unknown }).dependsOn; // 依赖 id 列表的原始值
+      const dependsOn = Array.isArray(depRaw)
+        ? depRaw
+            .filter((d): d is string => typeof d === "string" && d.trim().length > 0) // 过滤掉非字符串与空串
+            .map((d) => d.trim()) // 统一去掉首尾空白，避免依赖匹配失败
+        : []; // 非数组则视为无依赖
+      const name = String((row as { name?: unknown }).name || "").trim() || "步骤"; // 步骤名
+      const input = normalizePlannerStepInput((row as { input?: unknown }).input); // 步骤输入（兼容对象）
+      const action = normalizeWorkflowAction((row as { action?: unknown }).action); // 动作
+      const condition = parseWorkflowConditionFromUnknown((row as { condition?: unknown }).condition); // 第17天：可选 condition（不存在则为 undefined）
+      const requiresConfirmation = (row as { requiresConfirmation?: unknown }).requiresConfirmation === true; // 第18天：Planner 布尔字段
+      const confirmationMessageRaw = (row as { confirmationMessage?: unknown }).confirmationMessage; // 第18天：确认文案原始值
+      const confirmationMessage =
+        typeof confirmationMessageRaw === "string" ? confirmationMessageRaw.trim() : ""; // 规范为 trim 字符串
+      out.push({
+        id: idCandidate,
+        name,
+        action,
+        input: input || name,
+        dependsOn: dependsOn.length ? dependsOn : undefined,
+        ...(condition ? { condition } : {}), // 有条件对象才展开写入：避免写入 undefined 键
+        ...(requiresConfirmation
+          ? {
+              requiresConfirmation: true, // 标记需 HITL
+              ...(confirmationMessage ? { confirmationMessage } : {}), // 有文案才写入
+            }
+          : {}), // 第18天：HITL 字段
+      }); // 缺 input 时用 name 占位
+    }
+    return out; // 返回解析结果
+  } catch {
+    const jsonMatch = modelOutput.match(/\[[\s\S]*\]/); // 抽取首个数组片段
+    if (jsonMatch) {
+      return parsePlannerPlanOutput(jsonMatch[0]); // 递归解析子串
+    }
+    return []; // 完全失败
+  }
+}
+
+/** 补全 Planner 步骤的稳定 id，并裁剪 dependsOn 中不存在的引用。 */
+function finalizePlannerPlanItems(items: PlannerPlanItem[]): FinalizedPlannerPlanItem[] {
+  const withIds: FinalizedPlannerPlanItem[] = items.map((it, i) => ({
+    ...it, // 保留 name/action/input/dependsOn 等字段
+    id: it.id ?? `step-${i + 1}`, // Planner 未给 id 时用 1-based 稳定缺省名
+  })); // 第一轮：保证每条都有字符串 id
+  const used = new Set<string>(); // 记录已占用的 id，用于检测冲突
+  for (let i = 0; i < withIds.length; i++) {
+    let id = withIds[i].id; // 当前步骤 id（可能被改写）
+    if (used.has(id)) {
+      id = `step-${i + 1}-${globalThis.crypto.randomUUID().slice(0, 8)}`; // 冲突则追加短随机后缀，保证全局唯一
+      withIds[i] = { ...withIds[i], id }; // 写回修正后的 id
+    } // 冲突处理结束
+    used.add(id); // 登记当前 id 为已使用
+  } // for 遍历所有步骤
+  const idSet = new Set(withIds.map((x) => x.id)); // 合法 id 集合，用于裁剪无效 dependsOn
+  return withIds.map((it) => ({
+    ...it, // 展开步骤其它字段
+    dependsOn: it.dependsOn?.filter((d) => idSet.has(d)), // 去掉指向不存在步骤的依赖边，避免执行器找不到 dep
+  })); // 返回最终可执行的计划项
+}
+
+/** 按 dependsOn 拓扑排序步骤（同一 DAG 仍保持深度优先相对稳定）。 */
+function topologicalSortWorkflowSteps(steps: WorkflowStep[]): WorkflowStep[] {
+  const byId = new Map(steps.map((s) => [s.id, s])); // id -> 步骤对象，便于 O(1) 查依赖
+  const visiting = new Set<string>(); // DFS 栈上的节点：用于环检测
+  const done = new Set<string>(); // 已完成访问并入序的节点
+  const ordered: WorkflowStep[] = []; // 拓扑序结果（依赖在前）
+
+  function visit(step: WorkflowStep): void {
+    if (done.has(step.id)) return; // 已排序过则跳过
+    if (visiting.has(step.id)) {
+      console.warn("[Workflow] dependency cycle at step:", step.id); // 环：依赖指向了正在访问的祖先
+      return; // 环上节点不再深入，避免无限递归
+    } // 环检测分支结束
+    visiting.add(step.id); // 标记进入当前子 DAG
+    for (const depId of step.dependsOn ?? []) {
+      const dep = byId.get(depId); // 解析依赖 id 到步骤；非法 id 则 dep 为 undefined
+      if (dep) visit(dep); // 先递归访问所有依赖
+    } // 依赖循环结束
+    visiting.delete(step.id); // 回溯：离开当前节点子树
+    done.add(step.id); // 标记本节点已完成
+    ordered.push(step); // 后序追加：保证依赖先于当前步出现在 ordered 中
+  } // visit 定义结束
+
+  for (const s of steps) visit(s); // 对每个根/孤立节点启动 DFS，覆盖全图
+
+  if (ordered.length < steps.length) {
+    for (const s of steps) {
+      if (!done.has(s.id)) ordered.push(s); // 环或脏依赖导致未入序的步骤，按原列表顺序追加兜底
+    } // 补全循环结束
+  } // 长度不一致时的修复
+  return ordered; // 返回可能含「末尾兜底块」的执行顺序
+}
+
+/** 第15天：Kahn 拓扑思想检测 dependsOn 图是否无环，并产出一个可行的 id 拓扑序（仅用于 validate，不替代执行器排序实现）。 */
+function kahnWorkflowTopology(steps: WorkflowStep[]): {
+  acyclic: boolean; // true 表示所有节点都能被 Kahn 弹出（即无环）
+  topoOrder: string[]; // Kahn 过程中弹出的 id 顺序（可作为合法执行序参考）
+  errors: string[]; // 若发现环则返回包含中文说明的错误列表（通常仅一条）
+} {
+  const idSet = new Set(steps.map((s) => s.id)); // 当前所有步骤 id 的快照集合，用于过滤非法依赖边
+  const inDegree = new Map<string, number>(); // 每个节点入度：有多少条来自有效 dependsOn 的入边
+  const adj = new Map<string, string[]>(); // 邻接表：fromId -> [toId,...]，语义为 to 依赖 from，必须先完成 from
+  for (const s of steps) {
+    inDegree.set(s.id, 0); // 初始化入度为 0，后续仅对有效边累加
+    adj.set(s.id, []); // 初始化空邻接表桶，避免 get 时 undefined
+  } // 初始化 for 结束
+  for (const s of steps) {
+    for (const depId of s.dependsOn ?? []) {
+      if (!idSet.has(depId)) continue; // 指向不存在 id 的边在这里忽略（其它校验会单独报「引用不存在」）
+      inDegree.set(s.id, (inDegree.get(s.id) ?? 0) + 1); // s 依赖 depId：depId 完成后 s 入度应记一条来自 dep 的约束
+      const bucket = adj.get(depId)!; // depId 出发的后继列表（必然存在，因 depId 必为某步 id）
+      bucket.push(s.id); // 记录边 depId -> s.id
+    } // 依赖循环结束
+  } // 构图 for 结束
+  const queue: string[] = []; // 入度为 0 的节点队列（可立即执行的步骤 id）
+  for (const s of steps) {
+    if ((inDegree.get(s.id) ?? 0) === 0) queue.push(s.id); // 没有任何有效入边的节点先入队
+  } // 初始队列构建结束
+  const topoOrder: string[] = []; // 记录被弹出顺序，用于与 steps.length 对比判断是否全部处理
+  while (queue.length > 0) {
+    const cur = queue.shift()!; // 取出一个当前可执行节点 id
+    topoOrder.push(cur); // 写入拓扑序输出
+    for (const nxt of adj.get(cur) ?? []) {
+      const nextDeg = (inDegree.get(nxt) ?? 0) - 1; // 去掉 cur->nxt 这条约束后 nxt 入度减一
+      inDegree.set(nxt, nextDeg); // 写回更新后的入度
+      if (nextDeg === 0) queue.push(nxt); // 新变成可执行的节点入队
+    } // 扩展后继循环结束
+  } // Kahn 主循环结束
+  const acyclic = topoOrder.length === steps.length; // 若弹出数量不足说明剩余子图入度均非 0（典型为有环）
+  const errors: string[] = []; // 错误收集器
+  if (!acyclic) errors.push("检测到步骤 dependsOn 存在循环依赖（DAG 不成立，拒绝执行）"); // 环的中文解释
+  return { acyclic, topoOrder, errors }; // 返回三元组供 validateWorkflow 消费
+} // kahnWorkflowTopology 函数结束
+
+/** 第15天：将 Planner/中间态工作流在进入 execute 前做静态校验，输出可展示的分条错误列表。 */
+function validateWorkflow(workflow: Workflow): { ok: boolean; errors: string[] } {
+  const errors: string[] = []; // 累积全部问题，最终一次性返回给调用方
+  const steps = workflow.steps; // 局部别名减少重复属性访问
+  if (steps.length === 0) errors.push("工作流 steps 为空：至少需要一个可执行步骤"); // 空工作流直接非法
+  const seenIds = new Set<string>(); // 用于判断是否出现重复 id
+  for (const s of steps) {
+    const idOk = typeof s.id === "string" && s.id.trim().length > 0; // id 必须是 Trim 后仍非空的字符串
+    if (!idOk) errors.push("存在步骤 id 为空或缺失：必须为稳定非空字符串"); // 指明 id 必要条件
+    else if (seenIds.has(s.id)) errors.push(`步骤 id 重复：${s.id}`); // 重复 id 会导致 dependsOn 二义性
+    else seenIds.add(s.id); // 记录首次出现的 id
+  } // id 遍历结束
+  const idSet = new Set(steps.map((x) => x.id)); // 重新基于当前 steps 构造 id 集合用于依赖存在性校验
+  for (const s of steps) {
+    if (!WORKFLOW_ALLOWED_ACTIONS.has(s.action)) errors.push(`步骤 ${s.id} 的 action 不在白名单内：${String(s.action)}`); // 与 Executor 支持动作对齐
+  } // action 遍历结束
+  for (const s of steps) {
+    for (const depId of s.dependsOn ?? []) {
+      if (!idSet.has(depId)) errors.push(`步骤 ${s.id} 的 dependsOn 引用不存在的步骤 id：${depId}`); // 非法引用必须显性报错
+    } // 每条依赖扫描结束
+  } // dependsOn 外层循环结束
+  const cycle = kahnWorkflowTopology(steps); // 计算 DAG 合法性（与 dependsOn 边方向一致）
+  if (!cycle.acyclic) errors.push(...cycle.errors); // 将判环阶段的错误并入总表
+  for (const s of steps) {
+    // 第17天：逐条校验 condition 结构与引用合法性（失败即阻断 executeWorkflow）
+    if (!s.condition) continue; // 无条件步骤：跳过本节校验
+    const c = s.condition; // 局部别名：减少重复属性访问链长度
+    if (!idSet.has(c.fromStepId)) errors.push(`步骤 ${s.id} 的 condition.fromStepId 引用不存在：${c.fromStepId}`); // from 必须指向真实 step id
+    if (c.operator !== "equals" && c.operator !== "includes" && c.operator !== "truthy") {
+      errors.push(`步骤 ${s.id} 的 condition.operator 非法：${String(c.operator)}`); // operator 必须是三元枚举之一
+    } // operator 合法性分支结束
+    if ((c.operator === "equals" || c.operator === "includes") && !c.value.trim()) {
+      errors.push(`步骤 ${s.id} 的 condition.value 不能为空（operator=${c.operator}）`); // equals/includes 必须提供可比对的非空值
+    } // value 非空分支结束
+    const depSet = new Set(s.dependsOn ?? []); // 将 dependsOn 转为集合：便于 O(1) 判断是否包含 fromStepId
+    if (!depSet.has(c.fromStepId)) errors.push(`步骤 ${s.id} 的 condition.fromStepId 未出现在 dependsOn：${c.fromStepId}`); // 数据流必须先读取来源输出（或可依赖 repair 自动补齐）
+  } // condition 校验 for 结束
+  for (const s of steps) {
+    // 第18天：confirmation 字段校验（waiting_confirmation 不是 failed）
+    if (!s.requiresConfirmation) continue; // 无需确认的步骤跳过
+    if (!s.confirmationMessage?.trim()) {
+      errors.push(`步骤 ${s.id} 设置了 requiresConfirmation 但 confirmationMessage 为空`); // 必须有可读确认文案
+    } // 文案非空校验结束
+  } // HITL validate for 结束
+  const ok = errors.length === 0; // 仅当无任何分条问题时认为 ok
+  return { ok, errors }; // 返回摘要供 POST 决定是否短路
+} // validateWorkflow 函数结束
+
+/** 第15天：将漂移的 action 字符串尽可能映射回 Executor 识别的四类工具枚举值。 */
+function repairWorkflowActionAlias(raw: WorkflowStepAction): WorkflowStepAction {
+  const key = String(raw).trim().toLowerCase(); // 统一成小写字符串，弱化大小写噪声
+  const table: Record<string, WorkflowStepAction> = {
+    summarize: "summary", // 常见动词变体
+    summarise: "summary", // 英式拼写兼容
+    summaries: "summary", // 复数误识别
+    todos: "todo", // Planner 可能的复数形式
+    tasks: "todo", // 「任务清单」漂移成 tasks
+    task: "todo", // 「任务」漂移成 task
+    forecast: "weather", // 预报语义映射到固定天气工具链
+    meteo: "weather", // meteorology 缩写式漂移
+    climate: "weather", // 「气候天气」漂移
+    search: "weather", // 与单步路由一致：search≈weather
+    classify: "judge", // 「分类/判定」漂移映射到 judge
+    judgement: "judge", // judgement 拼写漂移映射到 judge
+    decision: "judge", // decision 漂移映射到 judge
+  }; // 别名表字面量结束
+  if (table[key]) return table[key]!; // 命中表项则立即返回映射后的枚举
+  return normalizeWorkflowAction(raw); // 未命中再走第14天的归一入口，保证至少落在四象限动作里
+} // repairWorkflowActionAlias 函数结束
+
+/** 第15天：过滤 dependsOn 中引用不存在步骤 id 的边，避免出现悬挂依赖指针。 */
+function repairWorkflowFilterDependsOn(step: WorkflowStep, all: WorkflowStep[]): string[] | undefined {
+  const ids = new Set(all.map((x) => x.id)); // 有效 id 全集
+  const raw = step.dependsOn ?? []; // 原始依赖数组；undefined 等价于无依赖
+  const next = raw.filter((x) => ids.has(x)); // 仅保留指回真实存在的步骤 id
+  return next.length > 0 ? next : undefined; // 若无任何有效依赖边则删掉整个字段语义（返回 undefined）
+} // repairWorkflowFilterDependsOn 函数结束
+
+/** 第15天：若出现重复步骤 id，则保留首次出现并逐步为后续同名 id 重写为带随机后缀的稳定值，尽量不破坏 dependsOn（仍指向「首次 id」语义）。 */
+function repairWorkflowDuplicateStepIds(steps: WorkflowStep[]): WorkflowStep[] {
+  const used = new Set<string>(); // 记录已经出现过的字符串 id，用于检测碰撞
+  return steps.map((s, idx) => {
+    let nextId = s.id; // 默认沿用原 id
+    if (!nextId.trim() || used.has(nextId)) {
+      nextId = `step-${idx + 1}-${globalThis.crypto.randomUUID().slice(0, 8)}`; // 空或碰撞则重写为可读前缀加随机尾
+    } // 碰撞分支结束
+    used.add(nextId); // 登记新的最终 id
+    return { ...s, id: nextId }; // 返回带新 id 的步骤浅拷贝
+  }); // map 结束
+} // repairWorkflowDuplicateStepIds 函数结束
+
+/** 第17天：若声明了 condition，则确保 condition.fromStepId 出现在 dependsOn（Planner 漏写依赖边时的自动 repair）。 */
+function repairWorkflowConditionDependsOn(steps: WorkflowStep[]): WorkflowStep[] {
+  return steps.map((s) => {
+    if (!s.condition) return s; // 无条件步骤：依赖图不由本节改写
+    const fromId = s.condition.fromStepId; // 条件判定读取的输出来源步骤 id
+    const deps = [...(s.dependsOn ?? [])]; // 复制 dependsOn：避免多个步骤共享同一数组引用
+    if (!deps.includes(fromId)) deps.push(fromId); // 缺失则追加：确保拓扑序上来源先于本步（对齐数据流语义）
+    return { ...s, dependsOn: deps }; // 返回补上依赖后的新步骤对象（deps 至少包含 fromId）
+  }); // map 结束
+} // repairWorkflowConditionDependsOn 结束
+
+/** 第18天：requiresConfirmation 为 true 但缺 confirmationMessage 时自动补默认文案。 */
+function repairWorkflowConfirmationMessage(steps: WorkflowStep[]): WorkflowStep[] {
+  return steps.map((s) => {
+    if (!s.requiresConfirmation) return s; // 无需确认：原样返回
+    if (s.confirmationMessage?.trim()) return s; // 已有文案：不改动
+    return { ...s, confirmationMessage: `是否继续执行：${s.name}？` }; // Auto repair 默认问句
+  }); // map 结束
+} // repairWorkflowConfirmationMessage 结束
+
+/** 第15天：按 Planner 原始数组顺序做启发式：若 todo 未写 dependsOn 且前面出现过 summary，则把它链接到最近 summary。 */
+function repairWorkflowHeuristicTodoDependsOnSummary(steps: WorkflowStep[]): WorkflowStep[] {
+  const out: WorkflowStep[] = steps.map((s) => {
+    const { dependsOn: _oldDeps, ...rest } = s; // 同样避免「dependsOn: undefined」键污染推断
+    return s.dependsOn?.length ? { ...rest, dependsOn: [...s.dependsOn] } : { ...rest }; // 有依赖才保留 dependsOn
+  }); // clone 映射结束
+  let lastSummaryId: string | undefined = undefined; // 维护「最近一次 summary 步骤 id」指针
+  for (let i = 0; i < out.length; i++) {
+    const cur = out[i]!; // 当前遍历到的步骤别名，非空断言因 i 合法
+    if (cur.action === "summary") lastSummaryId = cur.id; // summary：更新最近一次总结指针
+    if (cur.action !== "todo") continue; // 非 todo 步骤跳过本题启发式
+    const hasDeps = (cur.dependsOn?.length ?? 0) > 0; // 若已存在依赖则不强行覆盖 Planner 语义
+    if (hasDeps) continue; // 尊重显式 DAG
+    if (!lastSummaryId) continue; // 若没有前置 summary，本启发式不适用
+    cur.dependsOn = [lastSummaryId]; // 显式补上「todo 依赖最近一次 summary」的边（常见业务链）
+  } // for i 扫描结束
+  return out; // 返回可能已经补依赖的数组
+} // repairWorkflowHeuristicTodoDependsOnSummary 函数结束
+
+/** 第15天：贪心删边消解环——每次判环失败后从末尾往前挑仍带 dependsOn 的步骤清空其 dependsOn，直到 Kahn 通过。 */
+function repairWorkflowBreakCyclesIfNeeded(steps: WorkflowStep[]): WorkflowStep[] {
+  const draft: WorkflowStep[] = steps.map((s) => {
+    const { dependsOn: _oldDeps, ...rest } = s; // 解构剥离 dependsOn，后续选择性加回
+    return s.dependsOn?.length ? { ...rest, dependsOn: [...s.dependsOn] } : { ...rest }; // 仅复制真实存在的依赖数组
+  }); // clone 结束
+  while (true) {
+    const { acyclic } = kahnWorkflowTopology(draft); // 重新评估是否已成为 DAG
+    if (acyclic) break; // 已 DAG 则结束修复
+    const victim = [...draft].reverse().find((x) => (x.dependsOn?.length ?? 0) > 0); // 末尾优先挑仍带依赖的牺牲步
+    if (!victim) break; // 理论不应发生：全员无依赖仍判环则可能数据异常；直接停下避免死循环
+    const { dependsOn: _rm, ...restVictim } = victim; // 通过解构删除依赖字段：比写 undefined 更符合可选键语义
+    Object.assign(victim, { ...restVictim }); // 就地写回无 dependsOn 的 victim 对象（保持数组引用稳定）
+  } // while true 修复结束
+  return draft; // 返回可能变薄依赖图的新步骤数组
+} // repairWorkflowBreakCyclesIfNeeded 函数结束
+
+/** 第15天：AUTO REPAIR：在规则允许的范围内重写 steps，使常见 Planner 漂移转为可校验结构。 */
+function repairWorkflow(workflow: Workflow): Workflow {
+  let steps: WorkflowStep[] = workflow.steps.map((s) => {
+    const { dependsOn: _oldDeps, ...rest } = s; // 解构去掉旧 dependsOn，避免写出「显式 undefined 键」触发 TS 奇怪推断
+    return s.dependsOn?.length ? { ...rest, dependsOn: [...s.dependsOn] } : { ...rest }; // 有依赖才挂 dependsOn 字段，保持可选键语义
+  }); // map 拷贝结束
+  steps = repairWorkflowDuplicateStepIds(steps); // 先解决 id 碰撞与空白 id（保证后续校验可定位）
+  steps = steps.map((s) => ({
+    ...s, // 展开旧字段
+    action: repairWorkflowActionAlias(s.action), // 归一 action 拼写/别名
+  })); // action 修复 map 结束
+  steps = steps.map((s) => {
+    const nextDeps = repairWorkflowFilterDependsOn(s, steps); // 计算过滤后的依赖数组或 undefined
+    const { dependsOn: _drop, ...rest } = s; // 丢掉旧依赖键，准备按「有则写入无则省略」重建对象
+    return nextDeps?.length ? { ...rest, dependsOn: nextDeps } : { ...rest }; // 仅非空依赖才展开 dependsOn 属性
+  }); // 依赖过滤 map 结束
+  steps = repairWorkflowConditionDependsOn(steps); // 第17天：补齐 condition 隐式依赖边，降低 Planner 漏写概率
+  steps = repairWorkflowConfirmationMessage(steps); // 第18天：补齐 HITL 确认文案
+  steps = repairWorkflowHeuristicTodoDependsOnSummary(steps); // 尝试自动补「summary→todo」链
+  steps = repairWorkflowBreakCyclesIfNeeded(steps); // 若仍因环非法，则删边直到无环
+  return { ...workflow, steps }; // 返回带新 steps 的工作流对象（status 等其它字段保持原样）
+} // repairWorkflow 函数结束
+
+/** 第15天：与文档命名对齐的 topologicalSort API，内部直接复用第14天 DFS 版实现，避免两套排序不一致。 */
+function topologicalSort(steps: WorkflowStep[]): WorkflowStep[] {
+  return topologicalSortWorkflowSteps(steps); // 委托：仍使用依赖图 + 环兜底策略
+} // topologicalSort 包装结束
+
+// ========== 第17天：条件分支 Conditional DAG（每行均为中文行尾注释）==========
+
+/** 第17天：从任意 judge 输出中提取 result 字段字符串（equals 主要比对目标）。 */
+function getJudgeResultValue(sourceOutput: unknown): string {
+  if (sourceOutput == null) return ""; // null/undefined：当作空串参与 equals/includes
+  if (typeof sourceOutput === "string") {
+    try {
+      const p = JSON.parse(sourceOutput) as unknown; // 尝试把字符串解析成结构化 judge JSON
+      return getJudgeResultValue(p); // 递归抽取内部 result：兼容模型输出「字符串化的 JSON」
+    } catch {
+      return sourceOutput.trim(); // 非 JSON：直接把原始字符串当作可比对的 result 文本
+    } // try/catch 结束
+  } // string 分支结束
+  if (typeof sourceOutput === "object" && !Array.isArray(sourceOutput)) {
+    const r = (sourceOutput as { result?: unknown }).result; // 读取 judge 对象的 result 字段
+    if (typeof r === "string") return r.trim(); // result 为字符串：规范化空白并返回
+    if (r != null) return JSON.stringify(r); // result 为非字符串：序列化成可比文本（少用）
+    return ""; // result 缺失：返回空串表示未知
+  } // object 分支结束
+  return String(sourceOutput); // 其余原始类型：统一转字符串参与判定
+} // getJudgeResultValue 结束
+
+/** 第17天：收集当前已成功步骤的输出字典（skipped 不产生可供下游条件读取的输出条目）。 */
+function buildSuccessStepOutputsRecord(steps: WorkflowStep[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {}; // 初始化 id→output 映射容器
+  for (const s of steps) {
+    if (s.status !== "success") continue; // 非 success：跳过（skipped/failed/pending 均不写入）
+    out[s.id] = s.output; // 写入该步骤最后一次成功输出对象引用
+  } // for steps 结束
+  return out; // 返回快照字典：evaluateCondition 只读使用该结构
+} // buildSuccessStepOutputsRecord 结束
+
+/** 第17天：根据 condition 判断是否应执行本步（无条件默认 true）。 */
+function evaluateCondition(step: WorkflowStep, stepOutputs: Record<string, unknown>): boolean {
+  if (!step.condition) return true; // 无条件步骤：不做分支裁剪判定
+  const sourceOutput = stepOutputs[step.condition.fromStepId]; // 取出条件引用来源步骤的输出
+  if (step.condition.operator === "equals") {
+    return getJudgeResultValue(sourceOutput) === step.condition.value; // equals：对齐 judge.result 字符串级别相等
+  } // equals 分支结束
+  if (step.condition.operator === "includes") {
+    return JSON.stringify(sourceOutput).includes(step.condition.value); // includes：序列化全文包含子串判断
+  } // includes 分支结束
+  if (step.condition.operator === "truthy") {
+    return Boolean(sourceOutput); // truthy：JavaScript 真值语义快速闸门
+  } // truthy 分支结束
+  return false; // 未知 operator：保守不匹配（validateWorkflow 理应拦截）
+} // evaluateCondition 结束
+
+/** 第17天：执行 judge 步骤：约束模型输出 JSON（result/reason）。 */
+async function runWorkflowJudge(args: {
+  stepInput: string; // Planner 下发的判断任务文本（通常引用上游材料）
+  chainSnapshot: string | undefined; // 并行批次冻结的线性前缀文本快照（Planner 漏依赖时的容错上下文）
+  memory: Memory; // Memory：注入提示词以避免遗忘目标语境
+  rt: ModelRuntime; // ModelRuntime：指向 Ollama 或 MiMo 网关
+  depTextRaw: string; // 依赖合并文本：来自 dependsOn 成功输出的结构化拼接
+  hasExplicitDeps: boolean; // 是否启用「依赖优先」提示结构（与 chat/summary 对齐）
+}): Promise<{ result: string; reason: string }> {
+  const memText = formatMemoryForPlanner(args.memory); // 生成 Planner 可读记忆块文本（供 judge 参考）
+  const inputBlock =
+    args.hasExplicitDeps && args.depTextRaw.trim()
+      ? `【依赖步骤结果】\n${args.depTextRaw}\n\n【待判断输入】\n${args.stepInput}` // 依赖优先：显式先列上游产物再贴判断输入
+      : [args.chainSnapshot ? `【前置步骤输出】\n${args.chainSnapshot}` : "", `【待判断输入】\n${args.stepInput}`] // 线性容错：前置链快照可选
+          .filter(Boolean) // 去掉空段避免多余换行
+          .join("\n\n"); // 组装最终 judge 输入正文块
+  const judgePrompt = `
+你是一个任务判断器。
+
+请根据输入判断状态，只返回 JSON：
+
+{
+  "result": "complete" | "incomplete",
+  "reason": "简短原因"
+}
+
+判断标准：
+1. 是否有明确完成内容
+2. 是否有遇到的问题
+3. 是否有当前系统能力
+4. 是否有下一步方向
+
+输入：
+${inputBlock}
+
+长期记忆（仅供参考）：
+${memText}
+`.trim(); // judgePrompt：模板正文（模板字符串内不写行尾注释，语义见邻近变量说明）
+  const { ok, text } = await invokeChatModel(args.rt, [{ role: "user", content: judgePrompt }]); // 单次补全拿到 judge JSON 文本
+  if (!ok) return { result: "incomplete", reason: "模型暂不可用，判定失败" }; // 上游不可用：保守返回 incomplete，避免误判 complete
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/); // 从模型废话中提取第一段 {...} JSON 片段
+    const parsed = JSON.parse(jsonMatch?.[0] || text) as { result?: unknown; reason?: unknown }; // 解析 JSON 对象为宽松结构
+    const result = typeof parsed.result === "string" ? parsed.result.trim() : "incomplete"; // result：必须是可读字符串枚举
+    const reason = typeof parsed.reason === "string" ? parsed.reason.trim() : ""; // reason：可选用中文简述「为何如此判定」
+    return { result: result || "incomplete", reason: reason || "" }; // 归一默认值：避免出现空字符串导致 equals 漂移
+  } catch {
+    return { result: "incomplete", reason: "输出不是合法 JSON，判定降级" }; // JSON 失败：降级 incomplete（分支更安全）
+  } // try/catch 结束
+} // runWorkflowJudge 结束
+
+// ========== 第16天：并行 DAG 调度辅助（每行均为中文行尾注释）==========
+
+/** 第16天：判断某步骤是否存在「已失败」或「已阻塞」的直接依赖（失败传播的一跳检测）。 */
+function stepHasFailedOrBlockedDependency(
+  step: WorkflowStep, // 当前待检查的步骤对象引用
+  byId: Map<string, WorkflowStep> // id 到步骤对象的索引表，O(1) 解析依赖
+): boolean {
+  const depIds = step.dependsOn ?? []; // 取出依赖 id 列表；无依赖则为空数组
+  for (const depId of depIds) {
+    // 逐个依赖检查其运行时状态是否阻断下游执行
+    const dep = byId.get(depId); // 通过 Map 查找依赖步骤；非法 id 时为 undefined
+    if (!dep) continue; // 依赖不存在：此处不当作失败传播条件（应由 validate 拦住）
+    if (dep.status === "failed" || dep.status === "blocked") return true; // 任一依赖失败/阻塞则本步不可再正常执行
+  } // for depIds 结束
+  return false; // 所有已存在依赖均非 failed/blocked：本步不因失败传播被一票否决
+} // stepHasFailedOrBlockedDependency 结束
+
+/** 第16天：将「仍 pending」但依赖已 failed/blocked 的步骤标记为 blocked（可多轮传递直到不动点）。 */
+function propagateBlockedSteps(steps: WorkflowStep[], byId: Map<string, WorkflowStep>): void {
+  let changed = true; // 控制不动点迭代：只要本轮写过 blocked 就可能继续触发链式阻塞
+  let guard = 0; // 安全计数器：防止异常数据导致死循环
+  while (changed && guard < steps.length + 8) {
+    // 最多迭代「步数级」次：DAG 深度上界足够覆盖常见 Planner 规模
+    changed = false; // 本轮先假设不会发生变化
+    guard += 1; // 递增守护计数
+    for (const s of steps) {
+      // 扫描所有步骤：仅 pending 可能被升级为 blocked
+      if (s.status !== "pending") continue; // 非 pending：不参与失败传播写入
+      if (!stepHasFailedOrBlockedDependency(s, byId)) continue; // 依赖侧健康：保持 pending 等待调度
+      s.status = "blocked"; // 显式标记阻塞：满足「失败沿依赖边向下游传播」的可观测语义
+      s.error = s.error ?? "上游步骤失败或被阻塞，本步骤不再执行"; // 给前端/日志一个稳定的人类可读原因
+      changed = true; // 标记本轮发生状态迁移，继续迭代以传递阻塞
+    } // for s 结束
+  } // while 不动点结束
+} // propagateBlockedSteps 结束
+
+/** 第16天：计算当前时刻可并行调度的 runnable steps（依赖均已 success 且自身仍为 pending）。 */
+function getRunnableSteps(
+  steps: WorkflowStep[], // 全量步骤数组（就地读写 status）
+  byId: Map<string, WorkflowStep>, // id 索引：快速取依赖对象
+  topoOrder: WorkflowStep[] // 拓扑稳定序：用于同批 runnable 的确定性排序
+): WorkflowStep[] {
+  const orderIdx = new Map<string, number>(); // stepId -> 在 topoOrder 中的下标
+  for (let i = 0; i < topoOrder.length; i++) orderIdx.set(topoOrder[i]!.id, i); // 构建下标表：保证同批输出顺序稳定
+  const runnable: WorkflowStep[] = []; // 收集本批可执行步骤
+  for (const s of steps) {
+    // 仅 pending 才可能进入 runnable（queued/running 表示已在途）
+    if (s.status !== "pending") continue; // 跳过非 pending：避免重复调度
+    const depIds = s.dependsOn ?? []; // 读取依赖列表
+    let allDepsSuccess = true; // 假设依赖全成功，遇到反例即置 false
+    for (const depId of depIds) {
+      // 检查每个依赖是否已 success 或 skipped（第17天：skipped 表示另一条分支未选，不阻断并行汇合）
+      const dep = byId.get(depId); // 取依赖对象
+      if (!dep || (dep.status !== "success" && dep.status !== "skipped")) {
+        // 依赖缺失或仍在途中：本步尚不可运行（pending/running/queued/failed/blocked 都会卡住调度）
+        allDepsSuccess = false; // 标记依赖未满足
+        break; // 提前结束内层循环
+      } // if 结束
+    } // for depIds 结束
+    if (!allDepsSuccess) continue; // 依赖未齐：留在下一轮批次
+    runnable.push(s); // 依赖满足且 pending：加入 runnable 集合
+  } // for s 结束
+  runnable.sort((a, b) => (orderIdx.get(a.id) ?? 0) - (orderIdx.get(b.id) ?? 0)); // 按拓扑序稳定排序：日志/UI 更可读
+  return runnable; // 返回本批将并行 await 的步骤列表
+} // getRunnableSteps 结束
+
+/** 第16天：工作流已全局失败后，将仍停留在 pending 的步骤统一标记为 blocked（避免 UI 悬挂「永远 pending」）。 */
+function sweepPendingToBlockedWhenWorkflowFailed(steps: WorkflowStep[]): void {
+  for (const s of steps) {
+    // 遍历所有步骤寻找「未调度完成」的残留 pending
+    if (s.status !== "pending") continue; // 非 pending：不需要扫尾
+    s.status = "blocked"; // 全局失败后的未执行步骤：用 blocked 表达「被短路」
+    s.error = s.error ?? "工作流已中断：本步骤未被调度执行"; // 给用户提供一致失败模型说明
+  } // for s 结束
+} // sweepPendingToBlockedWhenWorkflowFailed 结束
+
+/** 第16天：把一批刚成功的步骤输出按拓扑序拼入 linearPriorOutputs（批次结束后串行合并，避免并发写字符串竞态）。 */
+function mergeBatchSuccessOutputsToLinearChain(args: {
+  batch: WorkflowStep[]; // 刚结束的这一批步骤对象列表
+  topoOrder: WorkflowStep[]; // 全局拓扑序：决定拼接先后
+  prior: string; // 合并前的线性链字符串
+}): string {
+  const idx = new Map<string, number>(); // stepId -> topoOrder 下标
+  for (let i = 0; i < args.topoOrder.length; i++) idx.set(args.topoOrder[i]!.id, i); // 构建下标表
+  const successes = args.batch.filter((s) => s.status === "success"); // 仅成功步骤贡献链式上下文
+  successes.sort((a, b) => (idx.get(a.id) ?? 0) - (idx.get(b.id) ?? 0)); // 稳定按拓扑序输出，避免并行完成顺序抖动
+  let next = args.prior; // 从旧链开始累加
+  for (const s of successes) {
+    // 逐步把每个成功步骤的可读输出块拼到链尾
+    const body = typeof s.output === "string" ? s.output : JSON.stringify(s.output ?? ""); // 与旧逻辑一致：对象 JSON 化
+    next = [next, `[${s.name}]\n${body}`].filter(Boolean).join("\n\n"); // 以双换行分隔块，保持可读性
+  } // for successes 结束
+  return next; // 返回更新后的 linearPriorOutputs
+} // mergeBatchSuccessOutputsToLinearChain 结束
+
+/** 聚合依赖步骤的成功输出为一段注入文本（供下游工具 prompt 使用）。 */
+function formatDependencyOutputsForStep(
+  step: WorkflowStep,
+  byId: Map<string, WorkflowStep>
+): string {
+  const ids = step.dependsOn ?? []; // 本步骤声明依赖的步骤 id 列表
+  if (ids.length === 0) return ""; // 无依赖：下游工具不需要注入其它步输出
+  const parts: string[] = []; // 收集每段「步骤名 + 输出正文」
+  for (const depId of ids) {
+    const dep = byId.get(depId); // 按 id 取依赖步骤运行时对象
+    if (!dep || dep.status !== "success") continue; // 未执行或失败：不参与拼接，避免把错误混进 prompt
+    const body = typeof dep.output === "string" ? dep.output : JSON.stringify(dep.output ?? ""); // 统一成可嵌入提示的字符串
+    parts.push(`【${dep.name}】（id: ${depId}）\n${body}`); // 带可读标题与 id，便于模型区分来源
+  } // 遍历依赖 id
+  return parts.join("\n\n"); // 多段之间空行分隔，结构更清晰
+}
+
+/** Workflow Planner：把用户复杂需求拆成 1-4 个可执行步骤。 */
+async function planWorkflowSteps(
+  userInput: string,
+  memory: Memory,
+  rt: ModelRuntime
+): Promise<FinalizedPlannerPlanItem[]> {
+  const memText = formatMemoryForPlanner(memory); // 长期记忆文本（供 Planner 结合语境拆步）
+  const plannerPrompt = `
+你是一个 Workflow Planner。
+
+请把用户需求拆解成 2-5 个可执行步骤（若需求很简单则只返回 1 个步骤）。
+
+可用 action：
+- chat：普通回答
+- summary：总结内容
+- todo：生成待办
+- weather：查询天气
+- judge：结构化判断（只输出 JSON：{"result":"complete"|"incomplete"|"...","reason":"..."}），用于后续条件分支
+
+条件分支（第17天核心）：
+当用户需求包含「如果…就…」「判断…然后…」「根据结果…」「不完整则…/完整则…」等模式时：
+1) 先用 judge 产出结构化 result（例如 complete/incomplete，或自定义枚举但要与后续 condition.value 对齐）
+2) 下游分支步骤必须 dependsOn judge 步骤 id，并添加 condition 字段：
+
+"condition": {
+  "fromStepId": "step-1",
+  "operator": "equals",
+  "value": "complete"
+}
+
+operator 只能是："equals" | "includes" | "truthy"
+- equals：比对 judge 输出的 result 字符串（最常用）
+- includes：在来源输出序列化文本中包含 value 子串
+- truthy：来源输出真值判定（value 可填空字符串）
+
+务必把 condition.fromStepId 放进 dependsOn（若漏写服务端会尝试 repair，但希望你一次性写对）。
+
+人工确认（第18天 HITL）：
+当步骤属于以下类型时，请设置 requiresConfirmation=true 并提供 confirmationMessage：
+1) 最终提交、定稿、发布
+2) 删除、覆盖、发送等可能不可逆操作
+3) 用户明确要求「最终版」「提交版」
+4) 可能产生不可逆或高风险结果
+
+示例：
+"requiresConfirmation": true,
+"confirmationMessage": "即将生成最终提交版总结，是否继续？"
+
+要求：
+1. 只返回 JSON 数组
+2. 每个步骤必须包含：id（稳定唯一）、name、action、input（字符串）；天气步骤写城市名短句；不要嵌套 JSON 对象充当 input
+3. 若某一步需要直接使用前面步骤产出：dependsOn 写入前置 id 列表
+4. 条件分支步骤必须同时包含 dependsOn 与 condition（且 fromStepId 指向判定步骤）
+5. 不要输出解释
+
+用户需求：
+${userInput}
+
+长期记忆：
+${memText}
+`.trim(); // Planner 提示词：覆盖 Conditional DAG 编排约束
+
+  const { ok, text: raw } = await invokeChatModel(rt, [{ role: "user", content: plannerPrompt }]); // 调用模型生成步骤 JSON
+  if (!ok) {
+    return finalizePlannerPlanItems([{ name: "理解与回应", action: "chat", input: userInput }]); // 模型不可用：单步 chat 兜底
+  }
+  const trimmedRaw = raw.trim(); // 去掉模型输出首尾空白
+  const steps = parsePlannerPlanOutput(trimmedRaw); // 解析为 PlannerPlanItem 列表
+  if (steps.length === 0) {
+    return finalizePlannerPlanItems([{ name: "理解与回应", action: "chat", input: userInput }]); // 解析不到步骤则同样单步兜底
+  }
+  return finalizePlannerPlanItems(steps); // 返回规划结果供执行器消费
+}
+
+/** workflow 中的 chat 步骤：可串联前置步骤文本。 */
+async function runWorkflowChat(
+  stepInput: string,
+  chainPrefix: string | undefined,
+  memory: Memory,
+  rt: ModelRuntime
+): Promise<string> {
+  const userContent = [chainPrefix ? `前置步骤输出：\n${chainPrefix}` : "", `当前任务：\n${stepInput}`]
+    .filter(Boolean) // 无前缀时只保留「当前任务」段
+    .join("\n\n"); // 拼接成单条 user 消息正文
+  const memText = formatMemoryForPlanner(memory); // 记忆参考（注入 system）
+  const { ok, text } = await invokeChatModel(rt, [
+    {
+      role: "system", // 系统人设 + 长期记忆约束
+      content: `你是简洁的中文助手。结合用户长期记忆完成任务，不要输出 JSON。\n\n长期记忆：\n${memText}`, // 禁止 JSON，附带记忆块
+    },
+    { role: "user", content: userContent }, // 用户侧：前置输出 + 本步任务描述
+  ]); // 单轮补全完成该 chat 步骤
+  if (!ok) return "该步骤失败：模型暂不可用。"; // HTTP/业务失败时的固定中文提示
+  return text || "（无输出）"; // 成功但空正文则占位
+}
+
+/** 将整个 user 正文一次性交给模型（依赖链场景下已内含【依赖步骤结果】等结构化段落）。 */
+async function runWorkflowChatDirect(
+  fullUserBody: string,
+  memory: Memory,
+  rt: ModelRuntime
+): Promise<string> {
+  const memText = formatMemoryForPlanner(memory); // 与 runWorkflowChat 一致：把高/低记忆格式化为 Planner 可读块
+  const { ok, text } = await invokeChatModel(rt, [
+    {
+      role: "system", // 系统层：人设 + 长期记忆约束
+      content: `你是简洁的中文助手。结合用户长期记忆完成任务，不要输出 JSON。\n\n长期记忆：\n${memText}`, // 禁止 JSON，降低被上游路由提示污染的概率
+    }, // system 消息结束
+    { role: "user", content: fullUserBody }, // 用户层：整段已含「依赖结果 + 当前任务」结构化正文
+  ]); // 单轮补全
+  if (!ok) return "该步骤失败：模型暂不可用。"; // 与 runWorkflowChat 对齐的固定失败文案
+  return text || "（无输出）"; // 成功但空串则给占位，避免 undefined 泄漏到前端
+}
+
+/** 将各步成功产出整理为单一、自然的中文最终答复（Workflow Final Synthesizer）。 */
+export async function synthesizeWorkflowResult(workflow: Workflow, rt: ModelRuntime): Promise<string> {
+  const ordered = topologicalSort(workflow.steps); // 第15天：与 Executor 一致走同名 topologicalSort 封装（仍基于 DAG）
+  const lines = ordered
+    .filter((s) => s.status === "success" || s.status === "skipped") // 第17天：skipped 分支也要进入汇总上下文（提示模型忽略未执行分支）
+    .map((s) => {
+      if (s.status === "skipped") {
+        return `【步骤 ${s.name}】（${s.action}，id=${s.id}，skipped）\n${s.skipReason || "skipped"}`; // skipped：输出可读跳过原因而非工具产物
+      } // skipped 分支结束
+      const out =
+        typeof s.output === "string" ? s.output : JSON.stringify(s.output ?? ""); // 序列化输出：对象则 JSON，字符串原样
+      return `【步骤 ${s.name}】（${s.action}，id=${s.id}）\n${out}`; // 含 id 便于排障（模型可忽略括号内信息）
+    }) // map 结束
+    .join("\n\n"); // 步骤块之间双换行
+
+  const prompt = `
+你是 Workflow 最终汇总助手。
+
+请把以下 workflow 的执行结果整合成一篇「自然、连贯、完整」的中文最终回答给用户。
+不要使用「第一步 / 第二步」式的机械分段标题；让读者感觉是一个助手的一次性答复。
+若结果是待办或要点，可适当保留可读列表，但整体语气要统一。
+若有标注 skipped 的步骤，表示条件分支未选中：请在答复中自然忽略那条分支的产物。
+
+以下为各步骤产出。
+
+${lines || "(无可用步骤产出)"}
+
+请直接输出正文，不要 JSON。
+`.trim(); // 与文档“自然完整最终回答”一致
+
+  const { ok, text } = await invokeChatModel(rt, [{ role: "user", content: prompt }]); // 仅 user 提示：由模型复读并润色为多步合一答复
+  if (!ok) return lines || "工作流已完成。"; // 汇总模型失败：退回结构化步骤拼接文本或短句占位
+  return text?.trim() || lines || "工作流已完成。"; // 优先模型润色正文，否则仍为步骤罗列或保底句
+}
+
+/** 第16天：读取工作流是否已失败（独立函数避免 TS 控制流把 status 收窄掉）。 */
+function isWorkflowFailed(wf: Workflow): boolean {
+  return wf.status === "failed"; // 仅做布尔判断：不把调用方 wf 的 status 收窄成非 failed
+} // isWorkflowFailed 结束
+
+/** 第18天：用户取消关键步后整单 cancelled（策略 A）。 */
+function isWorkflowCancelled(wf: Workflow): boolean {
+  return wf.status === "cancelled"; // 与 failed 分开判断，避免把 waiting_confirmation 当 failed
+} // isWorkflowCancelled 结束
+
+/** 第18天：cancelled 后将残留 pending 标为 blocked，避免 UI 悬挂。 */
+function sweepPendingToBlockedWhenWorkflowCancelled(steps: WorkflowStep[]): void {
+  for (const s of steps) {
+    if (s.status !== "pending") continue; // 仅处理未调度 pending
+    s.status = "blocked"; // 用户取消后不再执行
+    s.error = s.error ?? "工作流已取消：本步骤未执行"; // 可读原因
+  } // for 结束
+} // sweepPendingToBlockedWhenWorkflowCancelled 结束
+
+/**
+ * 第16–17天：并行 DAG + 条件分支执行 workflow：validate 通过后按层分批 Promise.all；
+ * 第17天新增 evaluateCondition→skipped、judge action、[Condition] 结构化日志。
+ */
+export async function executeWorkflow(
+  workflow: Workflow, // 当前要执行并可被就地回填状态的工作流对象引用
+  memory: Memory, // 本轮记忆快照：供 summary/todo/chat 读取 shortTerm/items
+  rt: ModelRuntime, // Ollama 或 MiMo 的运行时密钥与模型路由信息
+  execOpts: { timeline: WorkflowTimelineEvent[]; defaultStepRetries: number } // 时间线缓冲与全局默认额外重试次数
+): Promise<ExecuteWorkflowResult> {
+  let linearPriorOutputs = ""; // 已执行批次合并后的线性串联文本（Planner 漏写 dependsOn 时的容错上下文）
+  const byId = new Map(workflow.steps.map((s) => [s.id, s])); // id→可变步骤指针，写入 output/status/duration/error
+  const ordered = topologicalSort(workflow.steps); // 严禁按 Planner 数组盲跑：统一走 topologicalSort DAG 排序
+  const appendTimeline = (message: string, stepId?: string) => {
+    execOpts.timeline.push({ ts: Date.now(), message, stepId }); // 与时间线数组共享引用，向外累计事件
+  }; // appendTimeline 闭包结束
+  workflow.executionBatches = []; // 第16天：初始化批次记录数组，供前端 Batch Timeline 渲染
+
+  /** 第16–17天：单步执行（含条件跳过与重试），读取批次开始时的链快照，避免同批并行互相污染线性前缀。 */
+  async function runOneStepWithRetries(step: WorkflowStep, chainSnapshot: string): Promise<void> {
+    const stepOutputsRecord = buildSuccessStepOutputsRecord(workflow.steps); // 第17天：汇总已成功步骤输出用于条件判定（字典快照）
+    const shouldRun = evaluateCondition(step, stepOutputsRecord); // 第17天：计算本步是否命中 condition（无条件恒 true）
+    if (step.condition) {
+      const sourceOutput = stepOutputsRecord[step.condition.fromStepId]; // 取出 actual：对照 expected 便于日志排查 Planner 漂移
+      console.log("[Condition]", {
+        stepId: step.id, // 当前被判定步骤 id
+        fromStepId: step.condition.fromStepId, // 条件引用来源步骤 id
+        operator: step.condition.operator, // 判定算子枚举值
+        expected: step.condition.value, // Planner 给予的期望值（equals/includes/truthy 语义各异）
+        actual: sourceOutput, // 运行时真实来源输出对象引用
+        matched: shouldRun, // 本次判定是否允许进入工具执行链
+      }); // 文档§8.8：结构化 Condition Debug 日志（服务端 stderr）
+    } // 仅在有 condition 字段时打印：避免无条件步骤噪声
+    if (!shouldRun) {
+      step.status = "skipped"; // 第17天：skipped 属于正常控制流而非 failed
+      step.skipReason = "condition not matched"; // 固定原因文案：前端可展示「条件未命中」
+      step.durationMs = 0; // 未调用模型：耗时记 0（与执行型步骤区分）
+      appendTimeline(`${step.name}（${step.id}）skipped：condition not matched`, step.id); // Timeline：可观测跳过事件
+      logWorkflow("step", {
+        goal: workflow.goal, // 工作流目标：跨日志关联键
+        stepId: step.id, // 步骤 id：与 Timeline 对齐
+        step: step.name, // 可读名称：快速定位 Planner 条目
+        action: step.action, // 原计划 action：虽未执行仍可记录意图
+        status: step.status, // skipped：状态机落点
+        parallel: true, // 并行执行器路径标记
+      }); // 跳过分支结构化日志：便于检索「为何没跑」
+      return; // 直接 return：跳过整个 retry/for 模型调用
+    } // shouldRun 为 false 分支结束
+    const retryField = step.retry; // Planner/调试可覆写的步骤级额外重试次数（不含首轮）
+    const extraRetries =
+      typeof retryField === "number" && Number.isFinite(retryField) && retryField >= 0
+        ? Math.floor(retryField) // 合法数字：向下取整，避免小数污染 for 上限
+        : execOpts.defaultStepRetries; // 未声明则继承全局默认值（通常为 2 次追加尝试）
+    const maxAttempts = 1 + extraRetries; // 总尝试次数=首轮 + extraRetries（文档约定语义）
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const stepStart = Date.now(); // 单次尝试起点：duration 覆盖整条「含重试」区间更利于排障
+      step.status = "running"; // 进入执行态（重试亦然：保持对用户可见的一致性）
+      step.error = undefined; // 新一轮尝试前清空历史错误摘要，避免成功仍残留陈旧文案
+      if (attempt === 0) {
+        appendTimeline(`${step.name}（${step.id}）started · 并行批次执行`, step.id); // 第一次开始：打点 started（带并行语义）
+      } else {
+        appendTimeline(`步骤 ${step.id} retry #${attempt}`, step.id); // 重试语义：对齐 trace 范本里的 retry #n 文案风格
+        console.log("[Workflow] step retry", { stepId: step.id, attempt, maxAttempts }); // 服务端 stderr 并排输出结构化重试计数
+      } // attempt 分支结束
+      const depTextRaw = formatDependencyOutputsForStep(step, byId); // 显示式 dependsOn：拼已成功依赖的输出
+      const hasExplicitDeps = Boolean(step.dependsOn?.length); // 是否与 Day14 「显式依赖链」语义一致（非仅用线性前缀）
+      const injectedPreview = hasExplicitDeps ? depTextRaw : chainSnapshot || ""; // 注入预览：显式依赖优先，否则用批次开始时的链快照
+      step.injectedContextPreview = injectedPreview || undefined; // 继续把注入快照暴露给前端 details 调试区
+      const linearChainPrefix = !hasExplicitDeps ? chainSnapshot || undefined : undefined; // summary/todo/chat 的线性前缀参数（冻结快照）
+      const dependencyTodoContext = hasExplicitDeps ? depTextRaw || undefined : undefined; // todo.generateTodosWithModel dependencyContext
+      logWorkflow("step", {
+        goal: workflow.goal, // 目标回顾：跨多请求的关联键之一
+        stepId: step.id, // id：与 Timeline 打点一致
+        step: step.name, // 可读名称便于肉眼扫日志
+        action: step.action, // 工具枚举：定位 switch 分支
+        status: step.status, // 预期 running（即使重试仍为 running）
+        dependsOn: step.dependsOn ?? [], // Planner 给定依赖快照
+        hasExplicitDeps, // 布尔：区分 depText vs chainSnapshot
+        attempt, // 当前尝试序号，便于排查偶发抖动
+        parallel: true, // 第16天：标记该 step 日志来自并行执行器
+      }); // step 起始日志对象结束
+      try {
+        let out: unknown; // 占位：由各 action 分支写入真实工具产物
+        if (step.action === "judge") {
+          out = await runWorkflowJudge({
+            stepInput: step.input, // judge 的任务文本：通常描述「要判定什么」
+            chainSnapshot, // 并行快照前缀：补齐 Planner 漏依赖时的材料上下文
+            memory, // Memory：注入 judgePrompt 以满足「结合长期语境判定」
+            rt, // ModelRuntime：路由到具体模型后端
+            depTextRaw, // 已成功依赖步骤输出拼接文本：hasExplicitDeps 时优先注入
+            hasExplicitDeps, // 是否采用依赖优先输入结构（与 summary/todo 一致）
+          }); // runWorkflowJudge：结构化输出对象 {result,reason}
+        } else if (step.action === "summary") {
+          out = await summarizeWithModel(
+            memory.shortTerm, // 短期对话：总结上下文主材料
+            step.input, // Planner 的焦点补充或材料提示字符串
+            memory, // 长期 items：为高优先级语境提供「目标锚点」
+            rt, // 模型调用参数：baseUrl/model/key
+            hasExplicitDeps ? depTextRaw || undefined : linearChainPrefix // dependency-first vs linear-prefix（快照）
+          ); // await summarizeWithModel
+        } else if (step.action === "todo") {
+          out = await generateTodosWithModel({
+            userInput: step.input, // todo 这一步的自然语言指令
+            memory, // 记忆：延续个性化待办
+            rt, // 模型运行时
+            chainPrefix: linearChainPrefix, // 无 dependsOn 时链路兜底文本
+            dependencyContext:
+              dependencyTodoContext && dependencyTodoContext.trim().length > 0
+                ? dependencyTodoContext // 非空则用显式 dependency prompt 构造
+                : undefined, // 空串视为无依赖语义，不传参
+          }); // generateTodosWithModel 结束
+        } else if (step.action === "weather") {
+          const latestUser = getLatestUserText(memory.shortTerm); // 兜底：城市名往往在最新 user utterance
+          const stepText =
+            step.input && step.input !== "[object Object]" ? step.input : ""; // Planner 与城市抽取的安全 input
+          const keyword = extractWeatherCity(stepText || latestUser); // 规整到支持的 cityMap 关键字
+          out = await realWeather(keyword); // Open-Meteo：可能因网络抖动抛错触发 retry
+        } else if (hasExplicitDeps && depTextRaw.trim()) {
+          out = await runWorkflowChatDirect(
+            `【依赖步骤结果】\n${depTextRaw}\n\n【当前任务】\n${step.input}`, // 依赖型 chat/direct 合二为一提示结构
+            memory, // 记忆 system 注入保持不变
+            rt // 运行时
+          ); // runWorkflowChatDirect 结束
+        } else {
+          out = await runWorkflowChat(step.input, chainSnapshot || undefined, memory, rt); // 默认前置链（快照）+ 本步指令
+        } // action dispatch 分支结束
+        step.output = out; // 成功：回填 output 供 summarize + 前端 excerpts
+        step.status = "success"; // lifecycle：success
+        step.durationMs = Date.now() - stepStart; // 记录最近一次成功尝试耗时（毫秒）
+        console.log("[Workflow] output:", step.output); // stderr 原始打印：快速对照 Timeline
+        appendTimeline(`${step.name}（${step.id}）success`, step.id); // trace：成功打点（对齐 Day15 范本）
+        logWorkflow("step", {
+          goal: workflow.goal, // 冗余 goal：便于分布式 grep
+          stepId: step.id, // id：二次确认
+          step: step.name, // name：人类友好
+          action: step.action, // action：回看工具
+          status: step.status, // success
+          durationMs: step.durationMs, // ms 统计
+          dependsOn: step.dependsOn ?? [], // deps
+          injectedContextPreview: step.injectedContextPreview, // 预览串
+          attempt, // 成功发生在第几次尝试也能被日志捕获
+          parallel: true, // 第16天：并行执行成功收尾日志
+        }); // step 成功结构化日志结束
+        return; // 本 step 全流程完成：结束该 Promise
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err); // 统一 stringify 捕获到的异常摘要
+        step.durationMs = Date.now() - stepStart; // 失败也把本轮 wall-clock 记到字段里，方便 UI 徽章
+        if (attempt < maxAttempts - 1) {
+          appendTimeline(`步骤 ${step.id} 失败（将进入重试）：${msg}`, step.id); // 仍为可恢复的失败：打点但不终结 workflow
+          console.warn("[Workflow] step attempt failed", { stepId: step.id, attempt, msg }); // warn：避免与 error 混级
+          continue; // for attempt：下一轮重试
+        } // 还可重试分支结束
+        step.status = "failed"; // 用尽次数仍失败：该 step lifecycle 设为 failed
+        step.error = msg; // UI 可读错误摘录
+        workflow.status = "failed"; // 全局 workflow 设为 failed（遇错即停整体语义仍保留）
+        appendTimeline(`步骤 ${step.id} 失败（已用尽重试）：${msg}`, step.id); // trace：终结性失败说明
+        logWorkflow("error", {
+          goal: workflow.goal, // goal：保留上下文锚
+          stepId: step.id, // 失败 id
+          step: step.name, // 步骤名：快速定位 Planner 条目
+          action: step.action, // 工具枚举，辅助判断重试价值
+          status: step.status, // failed
+          error: step.error, // 错误串
+          durationMs: step.durationMs, // 最后尝试耗时
+          attempts: maxAttempts, // 一眼可见总尝试次数
+          parallel: true, // 第16天：并行执行失败日志
+        }); // error 日志结束
+        return; // 结束该 Promise：同批其它任务仍可继续完成
+      } // try/catch 结束
+    } // attempt for 结束
+  } // runOneStepWithRetries 结束
+
+  let batchIndex = 0; // 第16天：批次计数器，从 1 开始写入 executionBatches
+  while (true) {
+    // 主调度循环：直到没有 pending 或 workflow 已失败短路
+    propagateBlockedSteps(workflow.steps, byId); // 每轮先失败传播：pending 且依赖 failed/blocked -> blocked
+    const pendingLeft = workflow.steps.some((s) => s.status === "pending"); // 是否仍存在未决的 pending 步骤
+    if (!pendingLeft) break; // 没有 pending：调度结束（成功或已全部 blocked/failed/success）
+    if (isWorkflowFailed(workflow)) {
+      // 若已在并行批次中产生失败：不再继续调度新批次
+      sweepPendingToBlockedWhenWorkflowFailed(workflow.steps); // 将残留 pending 统一标记为 blocked，避免 UI 悬挂
+      break; // 跳出主循环：保留 partial trace 与批次记录
+    } // failed 短路分支结束
+    if (isWorkflowCancelled(workflow)) {
+      // 第18天：用户取消后停止调度
+      sweepPendingToBlockedWhenWorkflowCancelled(workflow.steps); // 扫尾 pending
+      break; // 跳出主循环
+    } // cancelled 短路分支结束
+    const runnable = getRunnableSteps(workflow.steps, byId, ordered); // 计算当前可并行执行集合（入度为 0 的动态变体）
+    if (runnable.length === 0) {
+      // 无可运行步骤但仍存在 pending：属于异常/不可满足依赖态
+      for (const s of workflow.steps) {
+        // 尝试把剩余 pending 标记为 blocked 并给出可读原因
+        if (s.status !== "pending") continue; // 非 pending 不需要处理
+        s.status = "blocked"; // 标记阻塞：防止死循环空转
+        s.error = s.error ?? "调度器无法找到可运行步骤：请检查依赖图或上游状态是否一致"; // 给排障提示
+      } // for s 结束
+      workflow.status = "failed"; // 将整体工作流标为失败更符合「未完整执行」语义
+      break; // 终止循环
+    } // runnable 空分支结束
+    const hitlStep = runnable.find((s) => s.requiresConfirmation && !s.confirmed); // 第18天：本批中首个需确认且未确认的步（runnable 已拓扑排序）
+    if (hitlStep) {
+      hitlStep.status = "waiting_confirmation"; // 暂停态：非 failed、非 skipped
+      appendTimeline(
+        `⏸️ ${hitlStep.name}（${hitlStep.id}）等待用户确认：${hitlStep.confirmationMessage || "是否继续执行？"}`,
+        hitlStep.id
+      ); // HITL Timeline：等待确认
+      console.log("[HITL]", {
+        workflowId: workflow.id, // 工作流实例 id
+        stepId: hitlStep.id, // 待确认步骤 id
+        status: hitlStep.status, // waiting_confirmation
+        decision: "pause", // 本次为暂停而非用户决策
+      }); // 文档§8.8：HITL 结构化调试日志
+      workflow.status = "running"; // 整单仍为 running（暂停中，非 failed）
+      workflow.executionTimeline = execOpts.timeline; // 挂载当前 timeline 供前端展示
+      return { workflow, paused: true, waitingStepId: hitlStep.id }; // 提前返回：不进入 Promise.all
+    } // HITL 暂停分支结束
+    batchIndex += 1; // 递增批次号：Batch #1,#2,...
+    const batchTs = Date.now(); // 记录批次开始时间戳：用于 executionBatches 与 Timeline 对齐
+    workflow.executionBatches!.push({
+      batchIndex, // 写入批次序号：前端直接展示
+      stepIds: runnable.map((s) => s.id), // 写入本批并行 stepIds：前端 DAG/Batch UI 使用
+      ts: batchTs, // 写入批次时间：与 executionTimeline 同一时钟域
+    }); // push 结束
+    appendTimeline(
+      `调度批次 #${batchIndex}（并行 ${runnable.length} 步）：${runnable.map((s) => `${s.name}(${s.id})`).join("、")}`, // 中文可读批次边界说明
+      undefined // 批次级事件：不强绑定单一 stepId
+    ); // appendTimeline 结束
+    for (const s of runnable) {
+      // 将本批步骤从 pending 显式迁移到 queued：强化状态机语义
+      s.status = "queued"; // queued：已被调度器选中，将立刻进入 running
+      appendTimeline(`${s.name}（${s.id}）queued · 批次 #${batchIndex}`, s.id); // 队列打点：便于对齐 batch timeline
+    } // for queued 结束
+    const chainSnapshot = linearPriorOutputs; // 冻结本批开始前的线性链：避免同批并行读写竞态
+    await Promise.all(runnable.map((step) => runOneStepWithRetries(step, chainSnapshot))); // 第16天核心：层内并行 await
+    appendTimeline(`调度批次 #${batchIndex} 已结束（本批共 ${runnable.length} 步）`, undefined); // 批次收尾打点：并行边界清晰化
+    linearPriorOutputs = mergeBatchSuccessOutputsToLinearChain({
+      batch: runnable, // 传入本批对象列表：函数内部按 success 过滤
+      topoOrder: ordered, // 传入拓扑序：合并输出稳定
+      prior: chainSnapshot, // 传入批次前链：在快照基础上追加本批成功输出
+    }); // merge 结束
+    propagateBlockedSteps(workflow.steps, byId); // 批次后再次传播：如果本批产生 failed，则尽快阻塞下游 pending
+    if (isWorkflowFailed(workflow)) {
+      // 若本批任一 step 最终失败：workflow.status 已在 runOneStepWithRetries 内设置
+      sweepPendingToBlockedWhenWorkflowFailed(workflow.steps); // 全局失败扫尾：未调度步骤统一 blocked
+      break; // 停止继续进入下一批次
+    } // 本批后失败检测结束
+  } // while 主循环结束
+
+  if (workflow.status !== "failed" && workflow.status !== "cancelled") workflow.status = "success"; // 未失败/未取消则整体成功
+  return { workflow }; // 第18天：返回包装对象（无暂停）
+} // executeWorkflow 函数结束（第16–18天并行 DAG + HITL 版）
+
+/** 第18天：用户取消关键步（策略 A：整单 cancelled）。 */
+export function applyWorkflowUserCancel(workflow: Workflow, stepId: string, timeline: WorkflowTimelineEvent[]): Workflow {
+  const step = workflow.steps.find((s) => s.id === stepId); // 定位被取消的步骤
+  if (step) {
+    step.status = "skipped"; // 取消语义上本步未执行（与文档 cancel 示例一致）
+    step.skipReason = "user cancelled"; // 固定跳过原因
+  } // step 存在分支结束
+  workflow.status = "cancelled"; // 策略 A：整单停止
+  timeline.push({
+    ts: Date.now(), // 取消时刻
+    stepId, // 关联步骤
+    message: `用户取消步骤 ${stepId}，工作流已终止（策略 A）`, // Timeline 可读说明
+  }); // push 结束
+  sweepPendingToBlockedWhenWorkflowCancelled(workflow.steps); // 扫尾未执行 pending
+  console.log("[HITL]", {
+    workflowId: workflow.id, // 工作流 id
+    stepId, // 被取消步骤
+    status: step?.status ?? "unknown", // 步骤最终状态
+    decision: "cancel", // 用户决策
+  }); // HITL 取消日志
+  return workflow; // 返回就地更新后的工作流
+} // applyWorkflowUserCancel 结束
+
+/**
+ * POST 处理器：校验入参 → buildMemory → 路由 → 按 action 分发。
+ * 所有成功路径均返回 JSON 且包含更新后的 memory。
+ */
+export async function POST(req: Request) {
+  const requestStart = Date.now(); // 请求开始时间
+  try {
+    const body = (await req.json()) as {
+      messages?: ChatMessage[]; // 对话历史（user/assistant 文本）
+      memory?: IncomingMemoryPayload; // 上轮回传的记忆载荷
+      useWorkflow?: boolean; // 是否走多步工作流而非单步路由
+      /** 前端：`local` | `mimo`，缺省为本地 Ollama */
+      provider?: string; // 模型提供商开关
+      /** 小米 MiMo 模型 id，仅在 provider=mimo 时生效 */
+      mimoModel?: string; // MiMo 具体模型 id
+    }; // 请求 JSON 体的 TypeScript 形状断言（运行时不校验，需下方逻辑兜底）
+    const { messages, memory: incomingMemory, useWorkflow, provider: providerRaw, mimoModel: mimoModelRaw } =
+      body; // 解构常用字段便于后续校验
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return Response.json({ error: "messages is required" }, { status: 400 }); // 参数非法
+    }
+
+    const provider: ModelProvider = providerRaw === "mimo" ? "mimo" : "local"; // 仅在显式 mimo 时走云端，否则 Ollama
+    const mimoModel =
+      typeof mimoModelRaw === "string" && mimoModelRaw.trim()
+        ? mimoModelRaw.trim() // 使用前端传来的有效模型 id
+        : MIMO_MODEL_IDS[0]; // 缺省时取白名单首个默认模型
+
+    if (provider === "mimo") {
+      if (!isMimoModelId(mimoModel)) {
+        return Response.json(
+          {
+            error: `无效的 mimo 模型「${mimoModel}」。可选：${MIMO_MODEL_IDS.join("、")}`, // 明确列出可选模型
+          },
+          { status: 400 } // 客户端传参错误
+        );
+      }
+      const key = process.env.XIAOMI_MIMO_API_KEY?.trim(); // 服务端密钥，绝不来自前端
+      if (!key) {
+        return Response.json(
+          {
+            error:
+              "未配置环境变量 XIAOMI_MIMO_API_KEY：请在项目根目录复制 .env.example 为 .env.local 并填入密钥", // 引导本地配置
+          },
+          { status: 503 } // 服务未就绪
+        );
+      }
+    }
+
+    const rt: ModelRuntime = {
+      provider, // 当前请求选用的提供商
+      ollamaUrl: process.env.OLLAMA_API_URL?.trim() || DEFAULT_OLLAMA_API_URL, // Ollama 聊天 API 完整 URL
+      ollamaModel: process.env.OLLAMA_MODEL?.trim() || DEFAULT_OLLAMA_MODEL, // 本地默认模型名
+      mimoBaseUrl: process.env.XIAOMI_MIMO_BASE_URL?.trim() || DEFAULT_MIMO_BASE_URL, // 小米兼容网关 origin
+      mimoApiKey: process.env.XIAOMI_MIMO_API_KEY?.trim() || "", // 小米 API Key（local 时可为空）
+      mimoModel, // 当前 MiMo 模型（local 时亦携带但不使用）
+    };
+
+    const { memory, modelMessages } = await buildMemory(messages, incomingMemory, rt); // 构建记忆与模型上下文
+
+    /** 统一把本轮计算好的 memory 附加到任意业务负载上返回前端。 */
+    function withMemory(body: ChatResponsePayload): ChatResponseBody {
+      return { ...body, memory }; // 展开业务体并附加 memory
+    }
+
+    if (useWorkflow) {
+      const wfT0 = Date.now(); // 工作流总耗时起点
+      const goal = getLatestUserText(memory.shortTerm); // 以最新用户句为 workflow 目标
+      console.log("[Workflow] start:", goal); // 文档要求：可见 workflow goal
+      logWorkflow("start", { goal }); // 结构化开始日志
+
+      const planItems = await planWorkflowSteps(goal, memory, rt); // Planner：模型产出步骤草案
+      const wfId = globalThis.crypto.randomUUID(); // 工作流 id
+      let workflow: Workflow = {
+        id: wfId, // 唯一标识本次多步任务
+        goal, // 用户目标描述
+        status: "pending", // 初始为 pending；validate/repair 后可能直接 failed short-circuit
+        steps: planItems.map((p) => ({
+          id: p.id, // 稳定步骤 id（可能含随机后缀防冲突）
+          name: p.name, // Planner 可读标题
+          action: p.action, // chat | summary | todo | weather | judge（第17天）
+          input: p.input, // 已规范化的字符串入参
+          ...(p.dependsOn?.length ? { dependsOn: p.dependsOn } : {}), // 有依赖则展开写入，否则不写该字段
+          ...(p.condition ? { condition: p.condition } : {}), // 第17天：有条件对象则挂载到 WorkflowStep
+          ...(p.requiresConfirmation
+            ? {
+                requiresConfirmation: true, // 第18天：HITL 标记
+                confirmationMessage: p.confirmationMessage, // 确认文案（repair 可补）
+              }
+            : {}), // HITL 字段展开
+          status: "pending" as const, // 初始未执行；executeWorkflow 会写入 running/success/failed/skipped/waiting_confirmation
+        })), // FinalizedPlannerPlanItem → WorkflowStep 雏形
+      };
+
+      const timeline: WorkflowTimelineEvent[] = []; // 第15天 Runtime trace：贯穿 validate→repair→DAG execute→retry
+      const pushTimeline = (message: string, stepId?: string) => {
+        timeline.push({ ts: Date.now(), message, stepId }); // ISO 时刻由前端格式化为本地化时间文案
+      }; // pushTimeline 结束
+      pushTimeline("工作流管道：前置静态校验 validateWorkflow 开始"); // Timeline：阶段分界线
+      let validation = validateWorkflow(workflow); // 第一轮：尽量在零副作用前拦住非法 DAG/非法 action/非法引用
+      if (!validation.ok) {
+        pushTimeline(`校验失败，进入 repairWorkflow：${validation.errors.join("；")}`, undefined); // Timeline：复述错误原因摘要
+        workflow = repairWorkflow(workflow); // AUTO REPAIR：别名归一、补 dependsOn、削环等（按优先级）
+        pushTimeline("repairWorkflow 已运行，正在进行二次校验", undefined); // Timeline：repair 打点
+        validation = validateWorkflow(workflow); // 第二轮：只允许「可执行的合法 workflow」继续向下
+      } else {
+        pushTimeline("首轮校验通过（跳过 repairWorkflow）", undefined); // 快路径：避免误报修复噪音
+      } // validate 分支结束
+      if (!validation.ok) {
+        pushTimeline(`校验仍失败，拒绝执行（不进入模型工具链）：${validation.errors.join("；")}`, undefined); // 明确说明 short-circuit
+        workflow.status = "failed"; // 状态机：failed（无步骤进入 running 以上成功态）
+        workflow.executionTimeline = timeline; // 把截至目前的 trace 直接回传前端排错
+        const finalSummary = `工作流校验失败（未执行任何步骤）：\n${validation.errors.map((e) => `- ${e}`).join("\n")}`; // 用户可见：分条错误
+        logWorkflow("error", {
+          goal: workflow.goal, // 结构化日志：目标
+          workflowId: workflow.id, // 结构化日志：实例 id
+          validationErrors: validation.errors, // 结构化日志：错误数组便于聚合统计
+        }); // 校验失败也走 Workflow 级别 error 事件
+        return Response.json(withMemory({ type: "workflow", workflow, finalSummary })); // 早返回：避免 executeWorkflow 侧扰动
+      } // 校验短路返回结束
+      const topoPreview = topologicalSort(workflow.steps) // DAG 可读预览：不参与执行逻辑，仅占位 Timeline
+        .map((x) => x.id) // 映射为紧凑 id 列表
+        .join("→"); // 箭头串联：对齐教材式示意
+      pushTimeline(`校验通过：topologicalSort 预览序 ${topoPreview}`, undefined); // Timeline：写明真实执行将采用 DAG 序而非 Planner 数组序
+      workflow.status = "running"; // 与 Day14 一致：真正进入执行前先标 running
+      pushTimeline("执行器 executeWorkflow 启动（第16天：并行 DAG；第17天：condition/skipped；第18天：HITL 暂停）", undefined); // Timeline：executor 能力边界说明
+      let execResult = await executeWorkflow(workflow, memory, rt, {
+        timeline, // 传入共享数组：execute 内向同一缓冲 append
+        defaultStepRetries: WORKFLOW_DEFAULT_STEP_RETRIES, // 注入本轮全局默认额外重试次数
+      }); // executeWorkflow：直至 success、failed、cancelled 或 HITL 暂停
+      workflow = execResult.workflow; // 使用执行器就地更新后的引用
+      workflow.executionTimeline = timeline; // 执行后把完整 Timeline 挂载到 Workflow（JSON 一并下发）
+
+      if (execResult.paused && execResult.waitingStepId) {
+        savePausedWorkflow({
+          workflow, // 暂停快照
+          memory, // 续跑时 memory
+          timeline, // 共享 timeline 引用
+          defaultStepRetries: WORKFLOW_DEFAULT_STEP_RETRIES, // 默认重试
+        }); // 写入 pause store 供 confirm API 读取
+        const waitStep = workflow.steps.find((s) => s.id === execResult.waitingStepId); // 待确认步
+        const pauseSummary = `工作流已暂停，等待您确认关键步骤「${waitStep?.name ?? execResult.waitingStepId}」。\n${waitStep?.confirmationMessage ?? ""}`; // 用户可见暂停说明
+        logWorkflow("step", {
+          goal: workflow.goal, // 目标
+          workflowId: workflow.id, // id
+          waitingStepId: execResult.waitingStepId, // 待确认 id
+          hitl: "pause", // 第18天：HITL 暂停语义（复用 step 事件通道）
+        }); // HITL 暂停日志
+        return Response.json(
+          withMemory({
+            type: "workflow", // 仍走 workflow 卡片
+            workflow, // 含 waiting_confirmation 步骤
+            finalSummary: pauseSummary, // 暂停提示而非最终汇总
+            paused: true, // 前端展示确认按钮
+            waitingStepId: execResult.waitingStepId, // 对齐确认 API
+          })
+        ); // 早返回：不生成最终 synthesize
+      } // HITL 暂停返回结束
+
+      const wfDone = workflow; // 保持后续变量命名兼容
+      const wfElapsed = Date.now() - wfT0; // 总耗时
+
+      logWorkflow("done", {
+        goal: wfDone.goal, // 目标回顾
+        workflowId: wfDone.id, // 关联 id
+        status: wfDone.status, // 最终状态
+        durationMs: wfElapsed, // wall-clock 总耗时
+        steps: wfDone.steps.map((s) => ({ name: s.name, action: s.action, ms: s.durationMs })), // 每步摘要耗时
+      }); // 工作流收尾日志
+
+      const failedStep = wfDone.steps.find((s) => s.status === "failed"); // 首个失败步
+      const finalSummary =
+        wfDone.status === "success"
+          ? await synthesizeWorkflowResult(wfDone, rt) // 全成功：再问模型揉成一段自然语言总答复
+          : wfDone.status === "cancelled"
+            ? "工作流已由用户取消，未继续执行后续步骤。" // 第18天：策略 A 取消文案
+            : `工作流中断：${failedStep?.error || "未知错误"}`; // 有失败步：直接向用户交代错误原因
+
+      logAgent("result", {
+        action: "workflow", // Agent 顶层动作为 workflow
+        durationMs: wfElapsed, // 与 done 日志一致的总耗时
+        success: wfDone.status === "success", // 是否完整跑通
+      }); // Agent 结果日志
+
+      return Response.json(
+        withMemory({ type: "workflow", workflow: wfDone, finalSummary, paused: false }) // JSON：含 workflow 详情、总结与 memory
+      ); // 正常完成返回
+    }
+
+    // 路由阶段不附带 buildMemory 里为「最终聊天」准备的 system 记忆块，只喂路由 system + 近期 shortTerm，
+    // 避免同一段长记忆在提示里出现两次、干扰 JSON 格式输出。
+    const routeResult = await invokeChatModel(rt, [
+      { role: "system", content: buildRoutingSystemPrompt(memory) }, // 路由专用 system（含记忆块）
+      ...memory.shortTerm.map((m) => ({ role: m.role, content: m.content })), // 仅短期对话作为路由上下文
+    ]); // 路由模型调用
+    if (!routeResult.ok) {
+      const errStatus =
+        routeResult.status >= 400 && routeResult.status < 600 ? routeResult.status : 502;
+      return Response.json(
+        { error: routeResult.text || "模型请求失败" }, // 上游错误或网关错误
+        { status: errStatus }
+      ); // Response
+    }
+
+    const modelOutput = routeResult.text.trim(); // 路由模型输出文本
+    let parsed = parseModelOutput(modelOutput); // 解析 JSON 路由结果
+    const latestUser = getLatestUserText(memory.shortTerm); // 最新用户句
+    parsed = {
+      ...parsed, // 保留 content/keyword
+      action: resolveContinuationAction(latestUser, parsed, memory), // 延续语义修正 action
+    }; // 覆盖后的 parsed
+    // 各工具分支的「主输入」：优先用路由 JSON 的 content，空则回退到用户原话。
+    const toolInput = parsed.content || latestUser; // 工具主输入
+    const actionStart = Date.now(); // 动作阶段起始时间
+
+    logAgent("route", {
+      action: parsed.action, // 动作
+      input: toolInput, // 输入摘要
+      shortTerm: memory.shortTerm.length, // 短期条数
+      memoryItems: memory.items.length, // 长期条数
+      memoryChars: memoryItemsCharLength(memory.items), // 长期字符规模
+    }); // 路由日志
+
+    switch (parsed.action) {
+      // 天气：keyword/content/最新用户话术中解析城市 → Open-Meteo
+      case "weather": {
+        const keyword = extractWeatherCity(parsed.keyword || parsed.content || latestUser); // 解析城市
+        const result = await realWeather(keyword); // 调用天气 API（文件后部定义，运行时可用）
+        logAgent("result", {
+          action: parsed.action, // 记录动作
+          durationMs: Date.now() - actionStart, // 耗时
+          success: true, // 成功标记
+        }); // 结果日志
+        return Response.json(withMemory({ type: "weather", keyword: keyword || "未知", result })); // JSON 响应
+      }
+      // 总结：基于短期窗口 + 高优先级记忆做要点归纳
+      case "summary": {
+        const text = await summarizeWithModel(memory.shortTerm, toolInput, memory, rt); // 生成总结
+        logAgent("result", {
+          action: parsed.action, // 动作
+          durationMs: Date.now() - actionStart, // 耗时
+          success: true, // 成功
+        }); // 日志
+        return Response.json(withMemory({ type: "summary", text })); // 响应
+      }
+      // 待办：模型生成 JSON 任务列表，失败时用内置占位项
+      case "todo": {
+        const items = await generateTodosWithModel({ userInput: toolInput, memory, rt }); // 生成待办
+        logAgent("result", {
+          action: parsed.action, // 动作
+          durationMs: Date.now() - actionStart, // 耗时
+          success: true, // 成功
+        }); // 日志
+        return Response.json(withMemory({ type: "todo", items })); // 响应
+      }
+      // 默认闲聊：若路由给了 content 则直接使用，否则用 modelMessages 走第二轮生成
+      default: {
+        const chatContent =
+          parsed.content.trim().length > 0
+            ? parsed.content // 非空直接用路由正文
+            : await generateFallbackChat(modelMessages, rt); // 否则二次生成
+        logAgent("result", {
+          action: parsed.action, // 通常为 chat
+          durationMs: Date.now() - actionStart, // 耗时
+          success: true, // 成功
+        }); // 日志
+        return Response.json(withMemory({ type: "chat", content: chatContent })); // 响应
+      }
+    }
+  } catch (error) {
+    logAgent("error", {
+      success: false, // 失败
+      durationMs: Date.now() - requestStart, // 总耗时
+      error: error instanceof Error ? error.message : String(error), // 错误信息
+    }); // 异常日志
+    return Response.json({ error: "Internal server error" }, { status: 500 }); // 对外统一 500
+  }
+}
+
+/**
+ * 调用 Open-Meteo 公开接口获取当前天气；仅支持 cityMap 中已配置的城市。
+ */
+async function realWeather(city: string): Promise<string> {
+  const location = cityMap[city]; // 查表得坐标
+  if (!location) return "暂不支持该城市（当前仅支持：北京、上海）"; // 未支持城市
+  const res = await fetch(
+    `https://api.open-meteo.com/v1/forecast?latitude=${location.lat}&longitude=${location.lon}&current_weather=true`, // 当前天气 API
+    { cache: "no-store" } // 禁用缓存
+  ); // fetch
+  if (!res.ok) return "天气服务暂时不可用，请稍后再试"; // HTTP 错误
+  const data = (await res.json()) as {
+    current_weather?: { temperature?: number; windspeed?: number }; // 响应形状
+  }; // 断言 JSON
+  const temperature = data.current_weather?.temperature; // 温度
+  const windspeed = data.current_weather?.windspeed; // 风速
+  if (typeof temperature !== "number") return "未获取到实时天气数据，请稍后重试"; // 缺字段
+  const windText = typeof windspeed === "number" ? `，风速：${windspeed}km/h` : ""; // 可选风速文案
+  return `当前温度：${temperature}°C${windText}`; // 最终展示字符串
+}
