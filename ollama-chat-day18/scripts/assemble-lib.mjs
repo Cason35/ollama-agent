@@ -57,17 +57,7 @@ ${exportFns(read("routing"), [
 `
 );
 
-fs.writeFileSync(
-  path.join(root, "lib/workflow-log.ts"),
-  `/** Workflow 结构化日志。 */
-export function logWorkflow(
-  event: "start" | "step" | "done" | "error",
-  payload: Record<string, unknown>
-) {
-  console.log(\`[Workflow] \${event}\`, payload);
-}
-`
-);
+// workflow-log.ts 为手写模块，不在此脚本中生成
 
 fs.writeFileSync(
   path.join(root, "lib/chat-tools.ts"),

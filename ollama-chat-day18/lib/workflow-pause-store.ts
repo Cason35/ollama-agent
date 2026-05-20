@@ -13,20 +13,30 @@ export type PausedWorkflowContext = {
   defaultStepRetries: number; // 全局默认步骤重试次数，与首次 execute 一致
 }; // PausedWorkflowContext 结束
 
-/** 进程内 workflowId → 暂停上下文（单实例 dev；多实例部署需外置存储）。 */
-const pausedByWorkflowId = new Map<string, PausedWorkflowContext>(); // 内存表：key 为 workflow.id
+/** Next 会把不同 route 打成独立 chunk，模块级 Map 会各有一份；挂 globalThis 保证读写同一表。 */
+const PAUSE_STORE_KEY = "__ollamaWorkflowPauseStore" as const; // globalThis 上的键名
+
+type PauseStoreHost = typeof globalThis & {
+  [PAUSE_STORE_KEY]?: Map<string, PausedWorkflowContext>; // 可选：首次访问时创建
+}; // PauseStoreHost 结束
+
+function getPausedMap(): Map<string, PausedWorkflowContext> {
+  const host = globalThis as PauseStoreHost; // 进程内单例宿主
+  if (!host[PAUSE_STORE_KEY]) host[PAUSE_STORE_KEY] = new Map(); // 懒初始化共享 Map
+  return host[PAUSE_STORE_KEY]!; // 非空：上一行已赋值
+} // getPausedMap 结束
 
 /** 写入暂停上下文（覆盖同 id 旧值）。 */
 export function savePausedWorkflow(ctx: PausedWorkflowContext): void {
-  pausedByWorkflowId.set(ctx.workflow.id, ctx); // 以 workflow.id 为键保存可续跑状态
+  getPausedMap().set(ctx.workflow.id, ctx); // 以 workflow.id 为键保存可续跑状态
 } // savePausedWorkflow 结束
 
 /** 读取暂停上下文；不存在返回 undefined。 */
 export function loadPausedWorkflow(workflowId: string): PausedWorkflowContext | undefined {
-  return pausedByWorkflowId.get(workflowId); // O(1) 查找
+  return getPausedMap().get(workflowId); // O(1) 查找
 } // loadPausedWorkflow 结束
 
 /** 确认或取消完成后删除，避免重复提交。 */
 export function deletePausedWorkflow(workflowId: string): void {
-  pausedByWorkflowId.delete(workflowId); // 释放内存条目
+  getPausedMap().delete(workflowId); // 释放内存条目
 } // deletePausedWorkflow 结束
