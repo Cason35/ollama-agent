@@ -8,72 +8,14 @@ import {
   executeWorkflow,
   synthesizeWorkflowResult,
   WORKFLOW_DEFAULT_STEP_RETRIES,
-} from "@/app/api/chat/route"; // 复用 chat 路由导出的执行器与汇总（服务端模块）
+} from "@/lib/workflow-executor";
 import {
   deletePausedWorkflow,
   loadPausedWorkflow,
   savePausedWorkflow,
 } from "@/lib/workflow-pause-store"; // 暂停上下文读写
 import type { Memory } from "@/lib/workflow-types"; // 记忆类型
-import { MIMO_MODEL_IDS, type MimoModelId } from "@/lib/mimo-models"; // MiMo 白名单
-
-/** 与 chat route 一致的模型提供商枚举。 */
-type ModelProvider = "local" | "mimo"; // 本地或云端
-
-/** 与 chat route 一致的运行时配置。 */
-type ModelRuntime = {
-  provider: ModelProvider; // 提供商
-  ollamaUrl: string; // Ollama URL
-  ollamaModel: string; // 本地模型名
-  mimoBaseUrl: string; // MiMo base
-  mimoApiKey: string; // MiMo key
-  mimoModel: string; // MiMo 模型 id
-}; // ModelRuntime 结束
-
-const DEFAULT_OLLAMA_API_URL = "http://localhost:11434/api/chat"; // 默认 Ollama
-const DEFAULT_OLLAMA_MODEL = "qwen2.5:14b"; // 默认模型
-const DEFAULT_MIMO_BASE_URL = "https://token-plan-cn.xiaomimimo.com/v1"; // 默认 MiMo
-
-function isMimoModelId(id: string): id is MimoModelId {
-  return (MIMO_MODEL_IDS as readonly string[]).includes(id); // 白名单校验
-} // isMimoModelId 结束
-
-/** 从 confirm 请求体组装 ModelRuntime（与 POST /api/chat 逻辑对齐）。 */
-function buildModelRuntime(providerRaw: string | undefined, mimoModelRaw: string | undefined): {
-  rt: ModelRuntime | null;
-  errorResponse: Response | null;
-} {
-  const provider: ModelProvider = providerRaw === "mimo" ? "mimo" : "local"; // 归一 provider
-  const mimoModel =
-    typeof mimoModelRaw === "string" && mimoModelRaw.trim() ? mimoModelRaw.trim() : MIMO_MODEL_IDS[0]; // 默认首个模型
-  if (provider === "mimo") {
-    if (!isMimoModelId(mimoModel)) {
-      return {
-        rt: null,
-        errorResponse: Response.json(
-          { error: `无效的 mimo 模型「${mimoModel}」` }, // 错误说明
-          { status: 400 } // 客户端错误
-        ),
-      }; // 无效模型
-    } // mimo 校验
-    const key = process.env.XIAOMI_MIMO_API_KEY?.trim(); // 服务端密钥
-    if (!key) {
-      return {
-        rt: null,
-        errorResponse: Response.json({ error: "未配置 XIAOMI_MIMO_API_KEY" }, { status: 503 }), // 未配置
-      }; // 无密钥
-    } // 密钥检查
-  } // mimo 分支
-  const rt: ModelRuntime = {
-    provider, // 写入 provider
-    ollamaUrl: process.env.OLLAMA_API_URL?.trim() || DEFAULT_OLLAMA_API_URL, // Ollama URL
-    ollamaModel: process.env.OLLAMA_MODEL?.trim() || DEFAULT_OLLAMA_MODEL, // Ollama 模型
-    mimoBaseUrl: process.env.XIAOMI_MIMO_BASE_URL?.trim() || DEFAULT_MIMO_BASE_URL, // MiMo base
-    mimoApiKey: process.env.XIAOMI_MIMO_API_KEY?.trim() || "", // MiMo key
-    mimoModel, // MiMo 模型 id
-  }; // rt 对象
-  return { rt, errorResponse: null }; // 成功
-} // buildModelRuntime 结束
+import { buildModelRuntime } from "@/lib/model-runtime";
 
 /** POST：用户确认或取消 HITL 步骤。 */
 export async function POST(req: Request) {
