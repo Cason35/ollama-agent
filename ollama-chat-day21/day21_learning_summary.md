@@ -5,7 +5,8 @@
 1. 将后端 **`Map` mock** 替换为 **MySQL** 存储（重启 `next dev` 不丢 workflow）。
 2. 将全部 `/api/*` 收口为 **`{ ok, code, data, msg }`** 响应包，避免「查无记录」用 HTTP 404 导致 DevTools 误报。
 
-> **下一章**：§8 为第22天「Workflow 持久化 upsert 优化」学习计划（待实现）。
+> **下一章**：§8 为第21天能力跃迁总结；§9 为第22天「Tool Registry + 动态工具系统」学习计划。  
+> **说明**：`ollama-chat-day22` 已先完成「Workflow 持久化 Upsert 优化」，见 `ollama-chat-day22/day22_learning_summary.md`；§9 为下一阶段核心课纲。
 
 ---
 
@@ -25,7 +26,7 @@
 第19天  Persistent Conditional DAG Runtime + HITL
 第20天  Persistent Conditional DAG Runtime + HITL + Pluggable Storage（后端 Map mock）
 第21天  … + MySQL 持久化 + 统一 API 响应包
-第22天  … + 服务端 upsert 保留 createdAt（见 §8，计划）
+第22天  … + Upsert 保留 createdAt（`ollama-chat-day22` 已实现）+ Tool Registry（见 §9，计划）
 ```
 
 ---
@@ -186,7 +187,39 @@ Persistent Conditional DAG Runtime + HITL + Pluggable Storage + MySQL 持久化 
 
 ---
 
-## 7. 相关文件
+## 7. 第21天总结：从 Demo Runtime 到真实后端 Runtime
+
+第 21 天已经真正完成从 **「Demo Runtime」** 进入 **「真实后端 Runtime」** 的跃迁。
+
+### 7.1 你现在拥有的能力
+
+| 能力 | 说明 |
+|------|------|
+| MySQL 持久化 | workflow 写入数据库，不再依赖进程内 Map |
+| WorkflowStore 抽象 | 存储层可插拔，Runtime 不绑定具体实现 |
+| Backend Store | 浏览器经 API 访问服务端存储 |
+| 可恢复 Workflow | HITL 暂停 / 续跑状态可落库 |
+| 服务重启后状态不丢 | `next dev` 重启后 workflow 仍在 |
+| Runtime 与存储解耦 | 执行逻辑与 MySQL / local 实现分离 |
+
+### 7.2 核心认知
+
+你的 Agent Runtime **已经不是「浏览器玩具」**，而是：
+
+- 一个真正 **后端驱动** 的 Agent Runtime
+- 具备 **Persistent Conditional DAG Runtime + HITL + Pluggable Storage + MySQL + 统一 API 响应包**
+
+```text
+【第21天能力跃迁】
+
+Demo Runtime（内存 / 浏览器）
+        ↓
+真实后端 Runtime（MySQL + WorkflowStore + Envelope）
+```
+
+---
+
+## 8. 相关文件
 
 | 文件 | 说明 |
 |------|------|
@@ -202,81 +235,218 @@ Persistent Conditional DAG Runtime + HITL + Pluggable Storage + MySQL 持久化 
 | `app/api/workflow/confirm/route.ts` | HITL 确认 |
 | `scripts/init-mysql.sql` | 建库建表 |
 | `day21_test_cases.md` | 测试用例（含 envelope 验收） |
-| `ollama-chat-day20/day20_learning_summary.md` | 第20天与 §8 原始 MySQL 计划 |
+| `ollama-chat-day20/day20_learning_summary.md` | 第20天与原始 MySQL 计划 |
+| `ollama-chat-day22/day22_learning_summary.md` | Upsert 优化（已在 day22 仓库完成） |
 
 ---
 
-## 8. 第22天学习计划：Workflow 持久化 Upsert 优化
+## 9. 第22天学习计划：Tool Registry + Dynamic Tool System
 
-### 8.1 核心目标
+> **前置**：`ollama-chat-day22` 若已落地 Upsert，可直接在本仓库或 day23 分支上推进本节。  
+> **核心目标**：把「写死」的工具系统升级为 **动态工具注册系统（Tool Registry）**。
 
-在 day21 **MySQL + Envelope** 已稳定的前提下，优化 **`persistWorkflowFromApi` 的「先 GET 再 POST」** 模式：由服务端 **upsert 时保留 `created_at`**，前端保存 workflow 时 **可省略预读 GET**，减少一次 Network 请求，同时保持侧栏「创建时间」正确。
+### 9.1 为什么今天必须学这个？
 
-> **核心认知**：day21 的 GET 并非「校验数据库有没有数据」，而是 read-merge-write 读旧 `createdAt`；day22 把该语义下沉到 **SQL / API 契约**，而不是每次多打一条 GET。
-
-能力演进（完成后）：
-
-```text
-第21天  … + MySQL + Envelope（保存前可能 GET 一次）
-第22天  … + 服务端 upsert 保留 createdAt（保存可仅 POST 一次）
-```
-
-### 8.2 实现顺序
-
-#### 1. 扩展 `POST /api/workflows` 语义
-
-- `INSERT ... ON DUPLICATE KEY UPDATE` 时：**仅在新插入行**写入 `created_at`；更新行 **不覆盖** `created_at`（MySQL 默认 `ON DUPLICATE KEY UPDATE` 若不写 `created_at` 则保留原值）。
-- 核对 `MySQLWorkflowStore.save`：确认 UPDATE 分支未误改 `created_at`。
-- 响应仍为 envelope：`{ ok: true, data: { workflowId, created: boolean } }`（可选字段，便于调试）。
-
-#### 2. 调整 `persistWorkflowFromApi`（或新增 `persistWorkflowFromApiFast`）
+当前常见写法：
 
 ```ts
-// 伪代码：backend 模式可不再 await store.get
-await saveWorkflowState(store, buildWorkflowState({ ... })); // createdAt 由 DB 或响应带回
+if (action === "weather") runWeather()
+if (action === "summary") runSummary()
 ```
 
-- **local 模式**：可保持现有逻辑（localStorage 无 DB 级 `created_at` 列）。
-- **backend 模式**：去掉 `store.get`；保存后若 UI 需要 `createdAt`，从 POST 响应或随后 list 刷新侧栏。
+问题：工具越来越多、Runtime 越来越乱、Planner 不知道工具能力、无法动态扩展。
 
-#### 3. （可选）Chat / Confirm 响应携带 `createdAt`
+真正的 Agent Runtime **不会** `if/else` 分发工具，而是：
 
-- `/api/chat` 返回 `type: "workflow"` 时，若 workflow 为新建，附带 `workflowCreatedAt`。
-- 前端 `buildWorkflowState` 优先用 API 下发的 `existingCreatedAt`，与 §8.2 方案互补。
+```text
+🔥 Tool Registry
+```
 
-#### 4. 验收与测试
+### 9.2 第22天最终效果
 
-- backend 模式：触发 workflow 保存，Network **仅见 POST**（无前置 GET `:id`）。
-- 同一 `workflowId` 二次保存：`createdAt` 不变，`updatedAt` 刷新。
-- 重启 dev 后 `createdAt` 与 MySQL `created_at` 一致。
-- 在 `day22_test_cases.md` 补充 TC-22-01 ~ TC-22-03。
+```text
+Tool Registry
+├── weather
+├── summary
+├── todo
+├── judge
+└── ...
 
-### 8.3 任务清单与文件映射（待实现）
+Runtime：  toolRegistry.execute("weather")
+Planner：  可用工具列表由 registry.list() 动态生成
+```
 
-| 任务 | 目标文件 |
-|------|----------|
-| SQL upsert 保留 `created_at` | `lib/mysql-workflow-store.ts` |
-| POST 响应可选 `created` 标记 | `app/api/workflows/route.ts` |
-| 去掉 backend 保存前 GET | `lib/workflow-persistence.ts` |
-| 页面 / Store 适配 | `lib/backend-workflow-store.ts`、`app/page.tsx`（若需） |
-| 第22天测试文档 | `day22_test_cases.md`（新建于 day22 项目或本仓库续写） |
+做完第 22 天，系统升级为：**Plugin-based Agent Runtime V1**。
 
-### 8.4 第22天打卡模板
+### 9.3 任务 1：定义 Tool 接口
+
+统一所有工具，新建 `Tool` 类型：
+
+```ts
+type Tool = {
+  name: string
+  description: string
+  execute(input: unknown): Promise<unknown>
+}
+```
+
+示例：
+
+```ts
+const weatherTool: Tool = {
+  name: "weather",
+  description: "查询天气",
+  async execute(input) {
+    return runWeather(input)
+  },
+}
+```
+
+**核心认知**：从今天开始，`Tool = Runtime Plugin`。
+
+### 9.4 任务 2：实现 Tool Registry
+
+```ts
+class ToolRegistry {
+  private tools = new Map<string, Tool>()
+
+  register(tool: Tool) {
+    this.tools.set(tool.name, tool)
+  }
+
+  get(name: string) {
+    return this.tools.get(name)
+  }
+
+  list() {
+    return Array.from(this.tools.values())
+  }
+
+  async execute(name: string, input: unknown) {
+    const tool = this.get(name)
+    if (!tool) throw new Error(`Tool not found: ${name}`)
+    return tool.execute(input)
+  }
+}
+```
+
+注册示例：
+
+```ts
+toolRegistry.register(weatherTool)
+toolRegistry.register(summaryTool)
+toolRegistry.register(todoTool)
+toolRegistry.register(judgeTool)
+```
+
+### 9.5 任务 3：Executor 改成 Registry 驱动
+
+| 之前 | 升级后 |
+|------|--------|
+| `if (step.action === "weather") { ... }` | `await toolRegistry.execute(step.action, buildStepInput(step))` |
+
+**核心变化**：Runtime 从「知道所有工具」→ 只依赖 **Tool 接口**。
+
+### 9.6 任务 4：Planner 动态读取 Tool 信息
+
+之前 Planner Prompt 里写死 `weather / todo / summary`。
+
+升级：
+
+```ts
+const tools = toolRegistry.list()
+const toolPrompt = tools
+  .map((tool) => `- ${tool.name}: ${tool.description}`)
+  .join("\n")
+```
+
+Planner Prompt 片段：
+
+```text
+可用工具：
+
+${toolPrompt}
+```
+
+以后 `register(tool)` 即可，Planner **自动**感知新工具。
+
+### 9.7 任务 5：给 Tool 增加 Schema
+
+```ts
+type Tool = {
+  name: string
+  description: string
+  inputSchema?: unknown
+  outputSchema?: unknown
+  execute(input: unknown): Promise<unknown>
+}
+```
+
+示例：`weather` 的 `inputSchema: { city: "string" }`，`outputSchema: { temperature: "number" }`。  
+Planner / Validator / UI 后续均可复用 schema。
+
+### 9.8 任务 6：Tool Validator
+
+Runtime 执行前：`validateToolInput(tool, input)`。  
+例如 `weather` 需要 `city`，Planner 输出 `{}` 时 Validator 报「缺少 city」；以后可扩展 auto repair、default、fallback。
+
+### 9.9 任务 7：前端 Tool Explorer
+
+UI 展示已注册工具：`name`、`description`、`inputSchema`、`outputSchema`。  
+第一次拥有 **Runtime Plugin System** 的可视化入口。
+
+### 9.10 任务 8：Tool Debug 日志
+
+```ts
+console.log("[ToolRegistry] register", tool.name)
+console.log("[ToolRegistry] execute", { tool: tool.name, input })
+```
+
+### 9.11 第22天验收标准
+
+| # | 验收项 |
+|---|--------|
+| 1 | 是否定义 Tool 接口 |
+| 2 | 是否实现 ToolRegistry |
+| 3 | 是否支持 register / get / execute |
+| 4 | Executor 是否改成 Registry 驱动 |
+| 5 | Planner 是否动态读取工具列表 |
+| 6 | 是否增加 Tool Schema |
+| 7 | 是否实现 Tool Validator |
+| 8 | 前端是否展示 Tool Explorer |
+| 9 | 是否增加 ToolRegistry debug 日志 |
+
+### 9.12 第22天打卡模板（Tool Registry）
 
 ```text
 【第22天打卡】
 
-1. upsert 是否保留原 created_at：是 / 否
-2. backend 保存是否不再先发 GET：是 / 否
-3. 二次保存 createdAt 是否不变：是 / 否
-4. 重启后 createdAt 是否与库一致：是 / 否
-5. local 模式行为是否未破坏：是 / 否
+1. 是否定义 Tool 接口：是 / 否
+2. 是否实现 ToolRegistry：是 / 否
+3. 是否支持 register / get / execute：是 / 否
+4. Executor 是否改成 Registry 驱动：是 / 否
+5. Planner 是否动态读取工具列表：是 / 否
+6. 是否增加 Tool Schema：是 / 否
+7. 是否实现 Tool Validator：是 / 否
+8. 前端是否展示 Tool Explorer：是 / 否
+9. 是否增加 ToolRegistry debug 日志：是 / 否
 
-6. 遇到的最大问题：
+10. 遇到的最大问题：
 
-7. 当前系统能力：
+11. 当前系统能力：
+```
+
+### 9.13 第22天核心认知
+
+> **真正的 Agent Runtime，不是「调用几个函数」，而是「管理一组可插拔工具」。**
+
+能力演进（完成后）：
+
+```text
+第21天  真实后端 Runtime（MySQL + WorkflowStore + Envelope）
+第22天  Plugin-based Agent Runtime V1（Tool Registry + Schema + Validator + Tool Explorer）
 ```
 
 ---
 
-*实现日期：2026-05-21（第21天 MySQL + Envelope）；第22天计划见 §8；测试步骤见 `day21_test_cases.md`。*
+*实现日期：2026-05-21（第21天 MySQL + Envelope）；Upsert 见 `ollama-chat-day22`；Tool Registry 计划见 §9；测试步骤见 `day21_test_cases.md`。*
