@@ -1,6 +1,8 @@
 # 第22天学习总结：Tool Registry + Dynamic Tool System
 
-对照 `ollama-chat-day21/day21_learning_summary.md` §9 学习计划，本仓库 **`ollama-chat-day22`** 在 day21 **MySQL + Envelope + Upsert** 之上完成 **Plugin-based Agent Runtime V1**：
+对照 `ollama-chat-day21/day21_learning_summary.md` §9 学习计划，本仓库 **`ollama-chat-day22`** 在 day21 **MySQL + Envelope + Upsert** 之上完成 **Plugin-based Agent Runtime V1**。
+
+> **下一章**：§1–§7 为第22天实现总结；§9 为第23天「Tool Ecosystem + Tool Composition」学习计划。
 
 ```text
 Tool Registry
@@ -191,4 +193,260 @@ Plugin-based Agent Runtime V1 + Persistent DAG + HITL + MySQL + Envelope + Upser
 
 ---
 
-*实现日期：2026-05-23（第22天 Tool Registry）；Upsert 见 §7；测试步骤见 `day22_test_cases.md`。*
+## 9. 第23天学习计划：Tool Ecosystem + Tool Composition
+
+> **前置**：完成 §1–§7（Tool Registry + Schema + Validator + Tool Explorer）。  
+> **核心目标**：不只是「增加几个工具」，而是让 **Tool 开始互相组合**。
+
+### 9.1 当前 Runtime 的瓶颈
+
+你现在虽然有 **Tool Registry**，但工具仍是：
+
+- 单个工具、单步执行
+
+| 问题 | 说明 |
+|------|------|
+| Tool 无法复用 Tool | ❌ |
+| Tool 无法组合 | ❌ |
+| Tool 不会形成能力链 | ❌ |
+
+真正 Agent Runtime 演进路径：
+
+```text
+Tool
+  ↓
+Tool Composition
+  ↓
+Capability
+```
+
+### 9.2 第23天最终效果
+
+```text
+research_tool
+  ├─ weather_tool
+  ├─ summary_tool
+  └─ todo_tool
+```
+
+即：**Tool 调 Tool** —— 第一次拥有 **Tool Composition**。
+
+做完第 23 天后，系统从 **Plugin-based Runtime** 升级为 **Capability-based Agent Runtime V2**。
+
+### 9.3 任务 1：给 Tool 增加 context（非常关键）
+
+| 之前 | 升级 |
+|------|------|
+| `execute(input)` | `execute(input, context)` |
+
+Context 结构：
+
+```ts
+type ToolExecutionContext = {
+  workflowId: string
+  toolRegistry: ToolRegistry
+  memory?: MemoryItem[]
+  stepOutputs?: Record<string, unknown>
+  logger?: RuntimeLogger
+}
+```
+
+**为什么重要**：Tool 以后可以调用其他 Tool。
+
+### 9.4 任务 2：实现 Composite Tool（核心）
+
+新增类型：
+
+```ts
+type CompositeTool = Tool & {
+  subTools?: string[]
+}
+```
+
+示例：
+
+```ts
+const researchTool: Tool = {
+  name: "research",
+  description: "研究任务生成器",
+  async execute(input, context) {
+    const summary = await context.toolRegistry.execute("summary", input)
+    const todos = await context.toolRegistry.execute("todo", { summary })
+    return { summary, todos }
+  },
+}
+```
+
+第一次拥有：**Tool Composition**。
+
+### 9.5 任务 3：增加 Tool Capability 标签
+
+Tool 升级：
+
+```ts
+type Tool = {
+  name: string
+  description: string
+  capabilities?: string[]
+  execute(...)
+}
+```
+
+示例：
+
+```ts
+capabilities: ["text-summary", "task-generation"]
+```
+
+**为什么重要**：以后 Planner **不是按工具名选**，而是 **按 capability 选**。
+
+### 9.6 任务 4：Planner 改成 Capability Routing
+
+| 之前 | 升级 |
+|------|------|
+| 用 `summary` tool | 需要 `text-summary` + `task-generation` |
+
+Planner 再映射到：`summary` tool、`todo` tool。
+
+第一次真正理解：**Tool ≠ Capability**。
+
+### 9.7 任务 5：实现 Tool Dependency Graph（重点）
+
+目标展示：
+
+```text
+research
+ ├─ summary
+ └─ todo
+```
+
+新增字段：
+
+```ts
+dependencies: ["summary", "todo"]
+```
+
+前端展示：
+
+```text
+research
+  ├─ summary
+  └─ todo
+```
+
+第一次拥有：**Tool Graph**。
+
+### 9.8 任务 6：实现 Tool Sandbox（轻量版）
+
+**为什么**：未来 Tool 可能崩溃、timeout、无限递归、调自己。
+
+超时：
+
+```ts
+const result = await Promise.race([
+  tool.execute(...),
+  timeout(10000),
+])
+```
+
+递归守卫：
+
+```ts
+if (depth > 3) {
+  throw new Error("Tool recursion limit")
+}
+```
+
+第一次拥有：**Tool Isolation**。
+
+### 9.9 任务 7：Tool Metrics（很重要）
+
+`ToolRegistry` 增加统计：
+
+```ts
+{
+  totalCalls
+  successCalls
+  failedCalls
+  avgDuration
+}
+```
+
+UI 示例：
+
+```text
+weather  - calls: 12, avg: 240ms
+summary  - calls: 35
+```
+
+第一次拥有：**Runtime Metrics**。
+
+### 9.10 任务 8：新增几个真正有用的 Tool
+
+| # | 工具 | 说明 |
+|---|------|------|
+| 1 | `noteTool` | 保存笔记 |
+| 2 | `searchHistoryTool` | 搜索历史 workflow |
+| 3 | `generatePlanTool` | 根据目标生成学习计划 |
+| 4 | `criticTool` | 评估 workflow 结果质量（Self-evaluation Agent） |
+
+### 9.11 任务 9：Tool Explorer 升级
+
+展示维度：
+
+- Tool
+- Capabilities
+- Dependencies
+- Metrics
+- Schemas
+
+### 9.12 第23天验收标准
+
+| # | 验收项 |
+|---|--------|
+| 1 | Tool 是否支持 execution context |
+| 2 | 是否实现 Composite Tool |
+| 3 | Tool 是否能调用其他 Tool |
+| 4 | 是否增加 capabilities |
+| 5 | Planner 是否支持 capability routing |
+| 6 | 是否实现 Tool Dependency Graph |
+| 7 | 是否实现 timeout / recursion guard |
+| 8 | 是否实现 Tool Metrics |
+| 9 | 是否新增至少 3 个新 Tool |
+| 10 | Tool Explorer 是否升级 |
+
+### 9.13 第23天打卡模板
+
+```text
+【第23天打卡】
+
+1. Tool 是否支持 execution context：是 / 否
+2. 是否实现 Composite Tool：是 / 否
+3. Tool 是否能调用其他 Tool：是 / 否
+4. 是否增加 capabilities：是 / 否
+5. Planner 是否支持 capability routing：是 / 否
+6. 是否实现 Tool Dependency Graph：是 / 否
+7. 是否实现 timeout / recursion guard：是 / 否
+8. 是否实现 Tool Metrics：是 / 否
+9. 是否新增至少 3 个 Tool：是 / 否
+10. Tool Explorer 是否升级：是 / 否
+
+11. 遇到的最大问题：
+
+12. 当前系统能力：
+```
+
+### 9.14 第23天核心认知
+
+> **真正高级的 Agent，不是「工具多」，而是「工具能形成能力网络」。**
+
+能力演进（完成后）：
+
+```text
+第22天  Plugin-based Agent Runtime V1（Tool Registry + Schema + Validator）
+第23天  Capability-based Agent Runtime V2（Composition + Capability Routing + Tool Graph + Metrics）
+```
+
+---
+
+*实现日期：2026-05-23（第22天 Tool Registry）；Upsert 见 §7；第23天计划见 §9；测试步骤见 `day22_test_cases.md`。*
