@@ -1,6 +1,6 @@
 # Day 26 学习总结：RAG Runtime V3（Hybrid Search 混合检索 + Rerank 重排）
 
-本文件记录第 26 天 `ollama-chat-day26` 项目的学习理解、关键问答、与 day25 的能力对比，以及第 26 天打卡结果。
+本文件记录第 26 天 `ollama-chat-day26` 项目的学习理解、关键问答、与 day25 的能力对比、第 26 天打卡结果，以及第 27 天学习计划。
 
 ---
 
@@ -425,3 +425,355 @@ day26 的核心不是简单把 `topK` 改大，而是让 RAG 检索链路变成�
 ```
 
 这一步让系统从“能做 RAG”进入到“能分析和调试 RAG 质量”的阶段。
+
+---
+
+## 9. 第 26 天总结
+
+你第 26 天完成了：
+
+**RAG Runtime V3：Hybrid Search + Rule-based Rerank**
+
+你已经从：
+
+- 单纯向量检索
+
+升级成：
+
+- 多阶段检索系统
+
+现在你的 RAG 已经具备：
+
+- recallK / topK 两阶段检索
+- vector search（向量检索）
+- keyword search（关键词检索）
+- hybrid score（混合评分）
+- rule-based rerank（规则版重排）
+- retrieval mode 切换
+- RAG Debug Panel V3
+- noisy query 测试集
+- retrieval evaluation 表
+
+你今天遇到的问题非常关键：
+
+> 如果正确 chunk 没进入 recallK，rerank 无法挽救。
+
+这说明你已经理解了 RAG 的核心瓶颈：
+
+**Retrieval 质量上限由 Recall 决定**
+
+所以第 27 天重点不是继续“调 rerank”，而是：
+
+**提升 Recall 能力**
+
+---
+
+## 10. 第 27 天学习计划：Query Rewrite + Multi-Query Retrieval
+
+### 10.1 今日核心目标
+
+让系统不要只用“用户原问题”检索，而是自动生成多个检索 query，提高召回率。
+
+### 10.2 为什么第 27 天要做这个？
+
+你现在的流程是：
+
+```text
+用户 query
+-> embedding（向量化）
+-> recallK
+-> rerank
+```
+
+问题是：用户表达可能很模糊，例如：
+
+- 用户问：`人工确认有啥用？`
+- 文档里写的是：`Human-in-the-loop`、`HITL`、`等待用户确认`、`关键节点暂停`
+
+如果只用原 query，可能召回不到。
+
+所以要做：
+
+- **Query Rewrite**（查询改写）
+- **Multi-Query Retrieval**（多查询检索）
+
+### 10.3 第 27 天最终效果
+
+用户问：
+
+```text
+人工确认节点是干啥的？
+```
+
+系统自动生成：
+
+1. 人工确认节点的作用是什么
+2. HITL 在 Agent Runtime 中的作用
+3. Workflow 中 waiting_confirmation 状态的意义
+4. Agent 在关键步骤前暂停等待用户确认的机制
+
+然后用多个 query 检索，合并结果，再 rerank。
+
+---
+
+### 任务 1：新增 QueryRewriteTool
+
+新增工具：
+
+```ts
+const queryRewriteTool: Tool = {
+  name: "queryRewrite",
+  description: "将用户问题改写成多个用于知识检索的查询表达",
+  capabilities: ["query-rewrite", "retrieval-optimization"],
+
+  inputSchema: {
+    query: "string",
+    maxQueries: "number"
+  },
+
+  outputSchema: {
+    queries: "string[]"
+  },
+
+  async execute(input) {
+    // 调用 LLM 或规则生成 query variants
+  }
+}
+```
+
+---
+
+### 任务 2：先实现规则版 rewrite
+
+今天先别完全依赖模型，先做稳定规则版。
+
+```ts
+function rewriteQuery(query: string) {
+  const queries = new Set<string>()
+
+  queries.add(query)
+
+  if (query.includes("人工确认")) {
+    queries.add("HITL human in the loop")
+    queries.add("waiting_confirmation 用户确认 工作流")
+    queries.add("Agent 关键步骤 暂停 等待用户确认")
+  }
+
+  if (query.includes("工作流") || query.toLowerCase().includes("workflow")) {
+    queries.add("Workflow Runtime DAG 执行 依赖")
+    queries.add("工作流 状态机 执行步骤")
+  }
+
+  if (query.includes("工具") || query.toLowerCase().includes("tool")) {
+    queries.add("Tool Registry Capability Routing")
+    queries.add("工具注册 工具能力 路由")
+  }
+
+  if (query.includes("记忆") || query.toLowerCase().includes("memory")) {
+    queries.add("Memory longTerm shortTerm Summary Memory")
+    queries.add("长期记忆 短期记忆 摘要记忆")
+  }
+
+  return Array.from(queries).slice(0, 5)
+}
+```
+
+---
+
+### 任务 3：再实现 LLM 版 rewrite
+
+Prompt：
+
+```ts
+const prompt = `
+你是一个检索查询改写器。
+
+请把用户问题改写成 3-5 个适合知识库检索的查询。
+
+要求：
+1. 保留原始问题含义
+2. 包含中英文关键词
+3. 包含可能的专业术语
+4. 只返回 JSON
+
+格式：
+{
+  "queries": ["...", "..."]
+}
+
+用户问题：
+${query}
+`
+```
+
+建议策略：
+
+- 规则版作为 fallback
+- LLM 版优先
+
+---
+
+### 任务 4：实现 Multi-Query Retrieval
+
+现在：
+
+```ts
+retrieve(query)
+```
+
+升级成：
+
+```ts
+multiQueryRetrieve(query)
+```
+
+流程：
+
+1. rewrite query → `queries[]`
+2. 对每个 query 执行 `retrieve`
+3. 合并所有结果
+4. 按 `chunkId` 去重
+5. 聚合 score
+6. rerank
+7. 返回 topK
+
+---
+
+### 任务 5：实现结果去重
+
+同一个 chunk 可能被多个 query 命中。
+
+用：
+
+```ts
+const map = new Map<string, ScoredChunk>()
+
+// 如果重复：
+existing.score = Math.max(existing.score, newScore)
+existing.matchedQueries.push(query)
+```
+
+---
+
+### 任务 6：增加 matchedQueries 字段
+
+升级：
+
+```ts
+type ScoredChunk = {
+  chunk: KnowledgeChunk
+  vectorScore: number
+  keywordScore: number
+  hybridScore: number
+  rerankScore: number
+
+  matchedQueries?: string[]
+}
+```
+
+前端展示：
+
+```text
+Matched Queries:
+- HITL human in the loop
+- waiting_confirmation 用户确认 工作流
+```
+
+---
+
+### 任务 7：增加 query expansion debug panel
+
+展示：
+
+```text
+Original Query:
+人工确认节点是干啥的？
+
+Rewritten Queries:
+1. 人工确认节点的作用是什么
+2. HITL human in the loop
+3. waiting_confirmation 用户确认 工作流
+
+Retrieved Chunks:
+...
+```
+
+---
+
+### 任务 8：增加 Multi-Query Metrics
+
+新增：
+
+```ts
+type QueryRewriteMetrics = {
+  rewriteCount: number
+  avgGeneratedQueries: number
+  multiQueryHitRate: number
+  improvedTop1Count: number
+}
+```
+
+---
+
+### 任务 9：扩展 noisy query 测试
+
+继续用 `day26_test_cases.md`，新增：
+
+1. 人工确认节点是干啥的？
+2. 那个等用户点确认的状态是什么？
+3. 工具为啥要注册起来？
+4. Agent 怎么知道该用哪个能力？
+5. 长期知识和记忆有啥区别？
+
+比较：
+
+- single query vs multi query
+- top1Hit / top3Hit 是否提升
+
+---
+
+### 10.4 第 27 天验收标准
+
+1. 是否新增 QueryRewriteTool
+2. 是否实现规则版 query rewrite
+3. 是否实现 LLM 版 query rewrite
+4. 是否实现 multiQueryRetrieve
+5. 是否实现 chunk 去重
+6. 是否记录 matchedQueries
+7. Debug Panel 是否展示 rewritten queries
+8. 是否增加 multi-query metrics
+9. 是否完成 single vs multi query 对比测试
+
+---
+
+### 10.5 第 27 天打卡模板
+
+```text
+【第27天打卡】
+
+1. 是否新增 QueryRewriteTool：是 / 否
+2. 是否实现规则版 query rewrite：是 / 否
+3. 是否实现 LLM 版 query rewrite：是 / 否
+4. 是否实现 multiQueryRetrieve：是 / 否
+5. 是否实现 chunk 去重：是 / 否
+6. 是否记录 matchedQueries：是 / 否
+7. Debug Panel 是否展示 rewritten queries：是 / 否
+8. 是否增加 multi-query metrics：是 / 否
+9. 是否完成 single vs multi query 对比测试：是 / 否
+
+10. 遇到的最大问题：
+
+11. 当前系统能力：
+```
+
+---
+
+### 10.6 第 27 天核心认知
+
+记住一句话：
+
+> **Rerank 只能优化候选排序，Query Rewrite 才能扩大候选来源。**
+
+做完第 27 天后，你的系统会升级成：
+
+**RAG Runtime V4：Multi-Query Retrieval + Query Rewrite**
