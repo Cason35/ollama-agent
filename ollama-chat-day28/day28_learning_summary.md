@@ -1,6 +1,6 @@
 ﻿# Day 28 学习总结：Memory-aware Retrieval Pipeline（记忆感知检索流水线）
 
-本文档记录 `ollama-chat-day28` 项目的学习理解、关键问答、与 `ollama-chat-day27` 的对比、为什么这样设计，以及第 28 天打卡结果。
+本文档记录 `ollama-chat-day28` 项目的学习理解、关键问答、与 `ollama-chat-day27` 的对比、为什么这样设计、第 28 天打卡结果，以及第 29 天学习计划。
 
 ---
 
@@ -370,12 +370,443 @@ RAG Runtime V5（RAG 运行时 V5）
 
 ---
 
-## 8. 一句话总结
+## 8. 第 28 天总结
+
+### 8.1 你第 28 天完成的是什么
+
+**RAG Runtime V5（RAG 运行时 V5）：Memory-aware Retrieval Pipeline（记忆感知检索流水线）**
+
+这是一个非常大的跨越。
+
+因为现在你的系统已经不是：
+
+```text
+用户问题
+-> 检索
+-> 回答
+```
+
+而是：
+
+```text
+用户问题
+    ↓
+Ambiguous Detection（模糊查询检测）
+    ↓
+Memory（长期记忆）
+    ↓
+Recent Messages（最近对话消息）
+    ↓
+Knowledge Topics（知识库主题）
+    ↓
+Query Rewrite（查询改写）
+    ↓
+Multi Query Retrieval（多查询检索）
+    ↓
+Hybrid Search（混合检索）
+    ↓
+Rerank（重排）
+    ↓
+Prompt Injection（提示词注入）
+    ↓
+Answer（生成回答）
+```
+
+这已经开始接近 **Perplexity**（AI 搜索引擎）、**Cursor**（AI 编程 IDE）、**Claude Projects**（Claude 项目级知识上下文）、**OpenAI Deep Research**（OpenAI 深度研究模式）等产品背后的 **Retrieval Pipeline**（检索流水线）思路了。
+
+### 8.2 第 28 天核心认知
 
 day28 的核心不是让系统“多查几遍”，而是让系统在检索前先结合 Memory（记忆）、recentMessages（最近对话）和 knowledgeTopics（知识库主题）理解检索意图。
 
 ```text
 好的 RAG（检索增强生成）不只是检索知识，
 而是先理解用户到底想检索什么。
+```
+
+---
+
+## 9. 第 29 天学习计划：Knowledge Store + Incremental Indexing（知识库 + 增量索引）
+
+### 9.1 今日核心目标
+
+**RAG Runtime V6（RAG 运行时 V6）：Knowledge Store（知识库存储）+ Incremental Indexing（增量索引）**
+
+你现在的问题已经不是：
+
+```text
+怎么检索
+```
+
+而是：
+
+```text
+知识库越来越大怎么办？
+```
+
+### 9.2 为什么第 29 天必须学这个？
+
+现在你的知识库流程可能是：
+
+```text
+导入文档
+    ↓
+切 Chunk（文本片段）
+    ↓
+Embedding（向量化）
+    ↓
+存储
+```
+
+**问题：**
+
+如果未来有：
+
+- 100 份文档
+- 1000 份文档
+- 10000 个 Chunk（文本片段）
+
+每次都重新执行：
+
+```text
+Chunk（切块）
+-> Embedding（向量化）
+-> Save（保存）
+```
+
+性能会崩。
+
+**今天要解决的问题：Incremental Indexing（增量索引）**
+
+以后：
+
+```text
+新文档
+    ↓
+只处理新增部分
+```
+
+而不是：
+
+```text
+重新处理整个知识库
+```
+
+### 9.3 第 29 天最终效果
+
+**第一次导入：** `Agent学习笔记V1`
+
+系统：
+
+```text
+新增 35 chunks（文本片段）
+新增 35 embeddings（向量）
+```
+
+**再次导入：** `Agent学习笔记V2`
+
+系统：
+
+```text
+已有 35 chunks
+新增 4 chunks
+更新 2 chunks
+```
+
+而不是：
+
+```text
+重新生成全部 embedding（向量）
+```
+
+---
+
+### 任务 1：设计 Knowledge Store（知识库存储）
+
+新增：
+
+```ts
+type KnowledgeStore = {
+  documents: KnowledgeDocument[]
+  chunks: KnowledgeChunk[]
+
+  addDocument(...)
+  updateDocument(...)
+  deleteDocument(...)
+
+  retrieve(...)
+}
+```
+
+---
+
+### 任务 2：给 Document 增加版本号
+
+升级：
+
+```ts
+type KnowledgeDocument = {
+  id: string
+
+  title: string
+  content: string
+
+  version: number              // 版本号：同一文档多次导入时递增
+  contentHash: string            // 内容哈希：用于判断正文是否变化
+
+  createdAt: number
+  updatedAt: number
+}
+```
+
+**为什么？**
+
+以后判断「内容是否变化」不靠文件名，而靠 **contentHash**（内容哈希）。
+
+---
+
+### 任务 3：实现 Content Hash（内容哈希）
+
+推荐：**SHA256**（安全哈希算法 256 位）对 `content` 求摘要。
+
+例如：
+
+```ts
+import crypto from "crypto"
+
+function generateHash(content: string) {
+  return crypto
+    .createHash("sha256")
+    .update(content)
+    .digest("hex")
+}
+```
+
+---
+
+### 任务 4：Chunk Fingerprint（文本片段指纹）
+
+升级：
+
+```ts
+type KnowledgeChunk = {
+  id: string
+  documentId: string
+
+  chunkHash: string            // 片段哈希：用于判断该 chunk 文本是否变化
+  text: string
+  embedding: number[]
+}
+```
+
+**作用：**
+
+```text
+chunk 没变
+    ↓
+不用重新 embedding（向量化）
+```
+
+---
+
+### 任务 5：实现 Incremental Indexer（增量索引器）
+
+新增：
+
+```ts
+class IncrementalIndexer
+```
+
+**核心逻辑：**
+
+```text
+导入文档
+    ↓
+生成 chunk（文本片段）
+    ↓
+计算 chunkHash（片段哈希）
+    ↓
+比较旧 chunkHash
+    ↓
+只处理变化 chunk
+```
+
+**示例：**
+
+旧：`chunk1`、`chunk2`、`chunk3`
+
+新：`chunk1`、`chunk2`、`chunk3`、`chunk4`
+
+**结果：** 只对 `chunk4` 做 embedding（向量化）。
+
+---
+
+### 任务 6：Embedding Cache（向量缓存）
+
+新增 **embeddingCache**（向量缓存）：
+
+结构：
+
+```ts
+Map<
+  chunkHash,    // 片段哈希作为 key
+  embedding     // 向量作为 value
+>
+```
+
+**流程：**
+
+```text
+chunkHash
+    ↓
+Cache（缓存）存在？
+    ↓ 是
+直接读取 embedding
+    ↓ 否
+生成 embedding
+    ↓
+写入 Cache
+```
+
+---
+
+### 任务 7：Knowledge Metrics V2（知识库指标 V2）
+
+新增指标：
+
+| 指标 | 含义 |
+|---|---|
+| `documentsCount` | 文档数量 |
+| `chunksCount` | 文本片段数量 |
+| `cachedEmbeddings` | 从缓存复用的向量数 |
+| `generatedEmbeddings` | 新生成的向量数 |
+| `cacheHitRate` | 缓存命中率 |
+| `avgChunksPerDoc` | 平均每文档片段数 |
+
+**前端展示示例：**
+
+```text
+Documents: 15
+Chunks: 482
+
+Embedding Cache:
+Hit: 89%
+Miss: 11%
+```
+
+---
+
+### 任务 8：Knowledge Explorer（知识库浏览器）
+
+升级 **Tool Explorer**（工具浏览器）思路，新增 **Knowledge Explorer**（知识库浏览器）。
+
+**展示：**
+
+```text
+Document（文档）
+├─ chunks（文本片段列表）
+├─ version（版本号）
+├─ hash（内容哈希）
+├─ createdAt（创建时间）
+```
+
+**点击文档后显示：**
+
+- Chunk 列表（文本片段列表）
+- Embedding 状态（是否已向量化）
+- Chunk Hash（片段哈希）
+
+---
+
+### 任务 9：实现 Reindex Tool（重建索引工具）
+
+新增 Tool（工具）：
+
+```text
+reindexKnowledge
+```
+
+**作用：** 强制重建索引。
+
+**什么时候用？**
+
+- Chunk 策略变了（例如切块大小、重叠方式改变）
+- Embedding 模型变了（需要全部重新向量化）
+
+---
+
+### 任务 10：导入测试
+
+**测试步骤：**
+
+1. **第一次导入** `Workflow Runtime` 笔记  
+   - 记录：新增 chunks、新增 embeddings
+
+2. **第二次导入**（在笔记中增加 `Queue Runtime` 等内容）  
+   - 记录：新增 chunks、复用 chunks、**Cache Hit Rate**（缓存命中率）
+
+---
+
+### 9.4 第 29 天验收标准
+
+1. 是否实现 KnowledgeStore（知识库存储）
+2. 是否增加 Document Version（文档版本号）
+3. 是否实现 Content Hash（内容哈希）
+4. 是否实现 Chunk Hash（片段哈希）
+5. 是否实现 Incremental Indexer（增量索引器）
+6. 是否实现 Embedding Cache（向量缓存）
+7. 是否增加 Knowledge Metrics V2（知识库指标 V2）
+8. 是否实现 Knowledge Explorer（知识库浏览器）
+9. 是否新增 Reindex Tool（重建索引工具）
+10. 是否完成增量导入测试
+
+---
+
+### 9.5 第 29 天打卡模板
+
+```text
+【第29天打卡】
+
+1. 是否实现 KnowledgeStore：是 / 否
+2. 是否增加 Document Version：是 / 否
+
+3. 是否实现 Content Hash：是 / 否
+4. 是否实现 Chunk Hash：是 / 否
+
+5. 是否实现 Incremental Indexer：是 / 否
+6. 是否实现 Embedding Cache：是 / 否
+
+7. 是否增加 Knowledge Metrics V2：是 / 否
+8. 是否实现 Knowledge Explorer：是 / 否
+
+9. 是否新增 Reindex Tool：是 / 否
+10. 是否完成增量导入测试：是 / 否
+
+11. 遇到的最大问题：
+
+12. 当前系统能力：
+```
+
+---
+
+### 9.6 第 29 天核心认知
+
+记住一句话：
+
+> **小型 RAG 的核心是「检索」，大型 RAG 的核心是「索引管理」。**
+
+做完第 29 天后，你的系统会升级成：
+
+**RAG Runtime V6：Knowledge Store + Incremental Indexing（知识库存储 + 增量索引）**
+
+这也是你从「会做 RAG」走向「会维护长期知识系统」的开始。
+
+---
+
+## 10. 一句话总结（全文）
+
+```text
+day27：让 RAG 会用多个 query 找资料。
+day28：让 RAG 先结合记忆和上下文想清楚「用户到底想找什么」，再用多个 query 找资料。
+day29（计划）：让 RAG 在知识库变大时只增量更新索引，而不是每次全量重建。
 ```
 
