@@ -1,9 +1,9 @@
-/**
+﻿/**
  * 第22–23天：Tool Registry — 可插拔工具、Schema 校验、组合执行、沙箱与指标。
  */
-import { extractWeatherCity, getLatestUserText } from "@/lib/chat-tools"; // 天气城市抽取与最近用户消息
-import type { ModelRuntime } from "@/lib/model-runtime"; // 模型运行时类型
-import type { Memory, WorkflowStep } from "@/lib/workflow-types"; // 工作流步骤与记忆类型
+import { extractWeatherCity, getLatestUserText } from "@/lib/chat/chat-tools"; // 天气城市抽取与最近用户消息
+import type { ModelRuntime } from "@/lib/model/model-runtime"; // 模型运行时类型
+import type { Memory, WorkflowStep } from "@/lib/workflow/workflow-types"; // 工作流步骤与记忆类型
 
 /** Schema 字段类型（简化 JSON-Schema 风格，供 Planner / Validator / UI 复用）。 */
 export type ToolSchemaFieldType = "string" | "number" | "boolean" | "object" | "array"; // 支持的字段类型枚举
@@ -393,3 +393,4 @@ export function toolToDescriptor(tool: Tool, registry?: ToolRegistry): ToolDescr
     metrics: registry?.getMetrics(tool.name), // 附带指标
   };
 }
+

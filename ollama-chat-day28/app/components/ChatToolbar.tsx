@@ -1,8 +1,8 @@
-"use client"; // 聊天工具栏包含受控表单控件
+﻿"use client"; // 聊天工具栏包含受控表单控件
 
 import type { ChangeEvent, Dispatch, SetStateAction } from "react"; // 引入事件和 setter 类型
-import { MIMO_MODEL_OPTIONS } from "@/lib/mimo-models"; // 引入 MiMo 模型下拉选项
-import type { WorkflowStorageMode } from "@/lib/workflow-store"; // 引入存储模式类型
+import { MIMO_MODEL_OPTIONS } from "@/lib/model/mimo-models"; // 引入 MiMo 模型下拉选项
+import type { WorkflowStorageMode } from "@/lib/workflow/workflow-store"; // 引入存储模式类型
 
 /** 聊天顶部工具栏参数。 */
 type ChatToolbarProps = {
@@ -97,3 +97,4 @@ export function ChatToolbar({
     </div>
   );
 }
+

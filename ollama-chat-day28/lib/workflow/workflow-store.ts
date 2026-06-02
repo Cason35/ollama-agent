@@ -1,11 +1,11 @@
-/**
+﻿/**
  * 第20–22天：WorkflowStore 存储接口与工厂（backend 模式走 MySQL API）。
  * 每行带中文行尾注释。
  */
 
-import type { WorkflowState } from "@/lib/workflow-types"; // 持久化快照类型
-import { BackendWorkflowStore } from "@/lib/backend-workflow-store"; // 后端 MySQL API 实现
-import { LocalWorkflowStore } from "@/lib/local-workflow-store"; // 浏览器 localStorage 实现
+import type { WorkflowState } from "@/lib/workflow/workflow-types"; // 持久化快照类型
+import { BackendWorkflowStore } from "@/lib/workflow/backend-workflow-store"; // 后端 MySQL API 实现
+import { LocalWorkflowStore } from "@/lib/workflow/local-workflow-store"; // 浏览器 localStorage 实现
 
 /** 第20天：可切换的存储模式（local = 浏览器；backend = 服务端 MySQL API）。 */
 export type WorkflowStorageMode = "local" | "backend"; // 联合字面量
@@ -35,3 +35,4 @@ export function createWorkflowStore(mode: WorkflowStorageMode): WorkflowStore {
   } // backend 分支结束
   return new LocalWorkflowStore(); // 默认 localStorage
 } // createWorkflowStore 结束
+

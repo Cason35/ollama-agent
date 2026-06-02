@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 第21–22天：Workflow 列表与保存 API — GET list / POST save（MySQL 持久化）。
  * 第22天：POST 响应含 created、createdAt（upsert 保留库内 created_at）。
  * 每行带中文行尾注释。
@@ -8,12 +8,12 @@ import {
   API_REASON,
   apiJsonReasonError,
   apiJsonSuccess,
-} from "@/lib/api-envelope"; // 统一响应包
+} from "@/lib/api/api-envelope"; // 统一响应包
 import {
   WORKFLOW_STATE_VERSION,
-} from "@/lib/workflow-persistence-constants"; // 版本常量
-import { dbListWorkflows, dbSaveWorkflow } from "@/lib/workflow-db"; // MySQL 委托层
-import type { WorkflowState } from "@/lib/workflow-types"; // 快照类型
+} from "@/lib/workflow/workflow-persistence-constants"; // 版本常量
+import { dbListWorkflows, dbSaveWorkflow } from "@/lib/workflow/workflow-db"; // MySQL 委托层
+import type { WorkflowState } from "@/lib/workflow/workflow-types"; // 快照类型
 
 /** GET /api/workflows — 返回全部 WorkflowState[]（空数组而非 null）。 */
 export async function GET() {
@@ -56,4 +56,5 @@ export async function POST(request: Request) {
     return apiJsonReasonError(API_REASON.DB_SAVE_FAILED, message); // 500
   } // catch
 } // POST 结束
+
 

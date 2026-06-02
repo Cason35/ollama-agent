@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 第21–22天：服务端 Workflow 数据访问层 — 委托 MySQLWorkflowStore。
  * 第22天：dbSaveWorkflow 返回 created / createdAt 供 POST 响应。
  * 每行带中文行尾注释；仅用于 API Route，不可在客户端 import。
@@ -7,11 +7,11 @@
 import {
   mysqlWorkflowStore,
   type MySQLWorkflowSaveResult,
-} from "@/lib/mysql-workflow-store"; // MySQL 实现与 save 结果类型
-import type { WorkflowState } from "@/lib/workflow-types"; // 快照类型
+} from "@/lib/workflow/mysql-workflow-store"; // MySQL 实现与 save 结果类型
+import type { WorkflowState } from "@/lib/workflow/workflow-types"; // 快照类型
 import {
   WORKFLOW_STATE_VERSION,
-} from "@/lib/workflow-persistence-constants"; // 版本常量
+} from "@/lib/workflow/workflow-persistence-constants"; // 版本常量
 
 /** 第22天：写入或覆盖一条 WorkflowState，返回 upsert 元数据。 */
 export async function dbSaveWorkflow(
@@ -47,3 +47,4 @@ export async function dbDeleteWorkflow(workflowId: string): Promise<boolean> {
 export async function dbPurgeExpiredWorkflows(): Promise<number> {
   return mysqlWorkflowStore.purgeExpired(); // SQL DATE_SUB 7 DAY
 } // dbPurgeExpiredWorkflows 结束
+

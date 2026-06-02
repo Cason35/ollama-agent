@@ -1,9 +1,9 @@
-/**
+﻿/**
  * 单步工具：天气、总结、待办、闲聊兜底。
  */
-import { invokeChatModel, type ModelRuntime } from "@/lib/model-runtime";
-import type { ChatMessage, Memory, TodoItem } from "@/lib/chat-types";
-import { formatMemoryBlock } from "@/lib/chat-memory";
+import { invokeChatModel, type ModelRuntime } from "@/lib/model/model-runtime";
+import type { ChatMessage, Memory, TodoItem } from "@/lib/chat/chat-types";
+import { formatMemoryBlock } from "@/lib/chat/chat-memory";
 
 /** 演示用城市 → 经纬度，供 Open-Meteo 查询；未列入的城市会提示不支持。 */
 const cityMap: Record<string, { lat: number; lon: number }> = {
@@ -219,3 +219,4 @@ export async function realWeather(city: string): Promise<string> {
   const windText = typeof windspeed === "number" ? `，风速：${windspeed}km/h` : ""; // 可选风速文案
   return `当前温度：${temperature}°C${windText}`; // 最终展示字符串
 }
+

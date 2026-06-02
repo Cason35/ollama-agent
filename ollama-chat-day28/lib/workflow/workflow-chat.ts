@@ -1,10 +1,10 @@
-/**
+﻿/**
  * Workflow 内 chat 步骤执行（供 Tool Registry 与 Planner 复用，避免循环依赖）。
  * 每行带中文行尾注释。
  */
-import { formatMemoryForPlanner } from "@/lib/chat-memory"; // 长期记忆格式化
-import { invokeChatModel, type ModelRuntime } from "@/lib/model-runtime"; // 模型调用封装
-import type { Memory } from "@/lib/workflow-types"; // 记忆类型
+import { formatMemoryForPlanner } from "@/lib/chat/chat-memory"; // 长期记忆格式化
+import { invokeChatModel, type ModelRuntime } from "@/lib/model/model-runtime"; // 模型调用封装
+import type { Memory } from "@/lib/workflow/workflow-types"; // 记忆类型
 
 export async function runWorkflowChat(
   stepInput: string, // 当前步骤任务文本
@@ -43,3 +43,4 @@ export async function runWorkflowChatDirect(
   if (!ok) return "该步骤失败：模型暂不可用。"; // 降级
   return text || "（无输出）"; // 返回文本
 }
+

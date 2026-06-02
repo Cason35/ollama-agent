@@ -1,8 +1,8 @@
-/**
+﻿/**
  * 第28天：RAG Runtime V5 检索层 —— Pipeline 可复用的 Multi-Query Retrieval + Hybrid + Rerank。
  */
-import { embedText } from "@/lib/knowledge-embedding"; // 引入查询文本向量化函数
-import { rewriteQueryByRules } from "@/lib/query-rewrite"; // 引入规则版 query rewrite
+import { embedText } from "@/lib/knowledge/knowledge-embedding"; // 引入查询文本向量化函数
+import { rewriteQueryByRules } from "@/lib/knowledge/query-rewrite"; // 引入规则版 query rewrite
 import type {
   KnowledgeChunk,
   KnowledgeDocument,
@@ -10,7 +10,7 @@ import type {
   RetrievalMode,
   RetrieveOptions,
   RetrievedChunkHit,
-} from "@/lib/knowledge-types"; // 引入知识库检索相关类型
+} from "@/lib/knowledge/knowledge-types"; // 引入知识库检索相关类型
 
 /** 默认第一阶段召回数量。 */
 export const DEFAULT_RECALL_K = 20; // 默认先召回 20 个候选片段
@@ -247,3 +247,4 @@ export async function multiQueryRetrieve(
   const rewrittenQueries = options.enableQueryRewrite === false ? [q] : rewriteQueryByRules(q, maxQueries); // 规则改写
   return retrieveWithQueries(q, rewrittenQueries, documents, options); // 复用第28天可控 queries 检索
 }
+

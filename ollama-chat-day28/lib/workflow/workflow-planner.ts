@@ -1,21 +1,21 @@
-/**
+﻿/**
  * Workflow Planner：拆步、解析与步骤内 chat 执行。
  */
-import { invokeChatModel, type ModelRuntime } from "@/lib/model-runtime";
-import type { Memory } from "@/lib/workflow-types";
-import { formatMemoryForPlanner } from "@/lib/chat-memory";
+import { invokeChatModel, type ModelRuntime } from "@/lib/model/model-runtime";
+import type { Memory } from "@/lib/workflow/workflow-types";
+import { formatMemoryForPlanner } from "@/lib/chat/chat-memory";
 import {
   formatCapabilitiesForPlanner,
   formatToolsForPlanner,
   resolveActionFromCapabilities,
-} from "@/lib/tool-registry"; // 第23天：Capability Routing
-import { workflowToolRegistry } from "@/lib/workflow-tools";
-export { runWorkflowChat, runWorkflowChatDirect } from "@/lib/workflow-chat";
+} from "@/lib/tools/tool-registry"; // 第23天：Capability Routing
+import { workflowToolRegistry } from "@/lib/workflow/workflow-tools";
+export { runWorkflowChat, runWorkflowChatDirect } from "@/lib/workflow/workflow-chat";
 import type {
   WorkflowStep,
   WorkflowStepAction,
   WorkflowStepCondition,
-} from "@/lib/workflow-types";
+} from "@/lib/workflow/workflow-types";
 
 export function normalizeWorkflowAction(raw: unknown): WorkflowStepAction {
   if (raw === "weather" || raw === "search") return "weather"; // 天气与 search 别名统一为 weather
@@ -33,7 +33,7 @@ export function normalizeWorkflowAction(raw: unknown): WorkflowStepAction {
   return "chat"; // 默认走普通对话
 }
 /** 工作流 action 白名单（第22天：由 Tool Registry 动态生成，见 workflow-tools.ts）。 */
-export { WORKFLOW_ALLOWED_ACTIONS } from "@/lib/workflow-tools";
+export { WORKFLOW_ALLOWED_ACTIONS } from "@/lib/workflow/workflow-tools";
 
 /** 第15天：当步骤本体未给出 retry 字段时采用的默认「失败后可追加尝试次数」（不含首轮）。 */
 export const WORKFLOW_DEFAULT_STEP_RETRIES = 2; // 等价于首轮 + 最多 2 次重试，共 3 次机会（confirm 续跑复用）
@@ -314,4 +314,5 @@ ${memText}
   }
   return finalizePlannerPlanItems(steps); // 返回规划结果供执行器消费
 }
+
 

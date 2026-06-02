@@ -1,7 +1,7 @@
-"use client"; // 当前组件需要接收客户端状态并渲染动态徽标
+﻿"use client"; // 当前组件需要接收客户端状态并渲染动态徽标
 
-import type { WorkflowStorageMode } from "@/lib/workflow-store"; // 引入存储模式类型
-import type { WorkflowStateListItem } from "@/lib/workflow-types"; // 引入工作流历史摘要类型
+import type { WorkflowStorageMode } from "@/lib/workflow/workflow-store"; // 引入存储模式类型
+import type { WorkflowStateListItem } from "@/lib/workflow/workflow-types"; // 引入工作流历史摘要类型
 
 /** 顶部标题区组件参数。 */
 type HeaderProps = {
@@ -67,3 +67,4 @@ export function Header({
     </header>
   );
 }
+

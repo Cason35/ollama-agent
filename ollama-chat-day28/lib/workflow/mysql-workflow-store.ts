@@ -1,15 +1,15 @@
-/**
+﻿/**
  * 第21–22天：MySQLWorkflowStore — WorkflowState 持久化到 MySQL。
  * 第22天：upsert 不覆盖 created_at；save 返回 created 与权威 createdAt。
  * 每行带中文行尾注释；仅用于 API Route，不可在客户端 import。
  */
 
-import { pool } from "@/lib/mysql"; // 连接池
+import { pool } from "@/lib/db/mysql"; // 连接池
 import type { RowDataPacket } from "mysql2"; // mysql2 行类型基类
-import type { WorkflowState } from "@/lib/workflow-types"; // 快照类型
+import type { WorkflowState } from "@/lib/workflow/workflow-types"; // 快照类型
 import {
   WORKFLOW_STATE_VERSION,
-} from "@/lib/workflow-persistence-constants"; // 版本常量
+} from "@/lib/workflow/workflow-persistence-constants"; // 版本常量
 
 /** MySQL 行类型（snake_case 列名，继承 RowDataPacket 满足 mysql2 泛型约束）。 */
 interface WorkflowRow extends RowDataPacket {
@@ -184,3 +184,4 @@ export class MySQLWorkflowStore {
 
 /** 单例，供 workflow-db 薄封装委托。 */
 export const mysqlWorkflowStore = new MySQLWorkflowStore(); // 全局实例
+

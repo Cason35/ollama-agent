@@ -1,16 +1,16 @@
-/**
+﻿/**
  * 第20天：LocalWorkflowStore — 将第19天 localStorage 逻辑封装为 WorkflowStore（任务 2）。
  * 每行带中文行尾注释。
  */
 
-import type { WorkflowState } from "@/lib/workflow-types"; // 快照类型
-import type { WorkflowStore } from "@/lib/workflow-store"; // 存储接口
+import type { WorkflowState } from "@/lib/workflow/workflow-types"; // 快照类型
+import type { WorkflowStore } from "@/lib/workflow/workflow-store"; // 存储接口
 import {
   WORKFLOW_INDEX_KEY,
   WORKFLOW_KEY_PREFIX,
   WORKFLOW_STATE_EXPIRE_MS,
   WORKFLOW_STATE_VERSION,
-} from "@/lib/workflow-persistence-constants"; // 常量
+} from "@/lib/workflow/workflow-persistence-constants"; // 常量
 
 /** 是否运行在浏览器（SSR 时 localStorage 不可用）。 */
 function isBrowser(): boolean {
@@ -123,3 +123,4 @@ export class LocalWorkflowStore implements WorkflowStore {
     return removed; // 返回删除条数
   } // purgeExpired 结束
 } // LocalWorkflowStore 结束
+

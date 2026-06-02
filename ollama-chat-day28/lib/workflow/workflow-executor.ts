@@ -1,18 +1,18 @@
-/**
+﻿/**
  * Workflow 并行 DAG 执行器（含条件分支与 HITL）。
  */
-import { invokeChatModel, type ModelRuntime } from "@/lib/model-runtime";
-import type { Memory } from "@/lib/workflow-types";
+import { invokeChatModel, type ModelRuntime } from "@/lib/model/model-runtime";
+import type { Memory } from "@/lib/workflow/workflow-types";
 import type {
   ExecuteWorkflowResult,
   Workflow,
   WorkflowStep,
   WorkflowTimelineEvent,
-} from "@/lib/workflow-types";
-import { buildWorkflowToolInput, ToolValidationError } from "@/lib/tool-registry";
-import { workflowToolRegistry } from "@/lib/workflow-tools";
-import { topologicalSort } from "@/lib/workflow-validate";
-import { logWorkflow } from "@/lib/workflow-log";
+} from "@/lib/workflow/workflow-types";
+import { buildWorkflowToolInput, ToolValidationError } from "@/lib/tools/tool-registry";
+import { workflowToolRegistry } from "@/lib/workflow/workflow-tools";
+import { topologicalSort } from "@/lib/workflow/workflow-validate";
+import { logWorkflow } from "@/lib/workflow/workflow-log";
 
 export const WORKFLOW_DEFAULT_STEP_RETRIES = 2;
 
@@ -459,7 +459,7 @@ export async function executeWorkflow(
 export async function continueWorkflow(
   savedWorkflow: Workflow, // 持久化或 pause-store 中的工作流
   memory: Memory, // 记忆快照
-  rt: import("@/lib/model-runtime").ModelRuntime, // 模型运行时
+  rt: import("@/lib/model/model-runtime").ModelRuntime, // 模型运行时
   execOpts: {
     timeline: WorkflowTimelineEvent[]; // 共享时间线
     defaultStepRetries: number; // 步骤重试配置
@@ -494,3 +494,4 @@ export function applyWorkflowUserCancel(
   });
   return workflow;
 }
+

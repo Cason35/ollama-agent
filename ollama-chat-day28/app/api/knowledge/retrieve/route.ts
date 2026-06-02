@@ -1,14 +1,14 @@
-/**
+﻿/**
  * 第27天：POST /api/knowledge/retrieve — Query Rewrite + Multi-Query Retrieval（RAG Debug UI）。
  */
-import { API_CODE, apiJsonError, apiJsonSuccess } from "@/lib/api-envelope"; // Envelope
-import { knowledgeStore } from "@/lib/knowledge-store"; // 知识库
+import { API_CODE, apiJsonError, apiJsonSuccess } from "@/lib/api/api-envelope"; // Envelope
+import { knowledgeStore } from "@/lib/knowledge/knowledge-store"; // 知识库
 import {
   DEFAULT_MIN_SCORE,
   DEFAULT_RECALL_K,
   DEFAULT_RETRIEVAL_TOP_K,
   normalizeRetrievalMode,
-} from "@/lib/knowledge-retrieval"; // 默认值与模式规整
+} from "@/lib/knowledge/knowledge-retrieval"; // 默认值与模式规整
 
 /** POST body: { query: string, recallK?: number, topK?: number, minScore?: number, mode?: string } */
 export async function POST(req: Request) {
@@ -46,3 +46,4 @@ export async function POST(req: Request) {
     return apiJsonError(API_CODE.INTERNAL, API_CODE.INTERNAL, msg); // 500
   }
 }
+

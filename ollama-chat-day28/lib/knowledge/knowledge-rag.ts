@@ -1,8 +1,8 @@
-/**
+﻿/**
  * 第27天：RAG Prompt V4 — 严谨低幻觉 Prompt + Multi-Query matchedQueries + fallback。
  */
-import { invokeChatModel, type ModelRuntime } from "@/lib/model-runtime"; // LLM 调用
-import type { RagAnswerResult, RetrievedChunkHit } from "@/lib/knowledge-types"; // 类型
+import { invokeChatModel, type ModelRuntime } from "@/lib/model/model-runtime"; // LLM 调用
+import type { RagAnswerResult, RetrievedChunkHit } from "@/lib/knowledge/knowledge-types"; // 类型
 
 /** 无合格知识片段时的固定 fallback 回答（不硬塞低相关 chunk）。 */
 export const RAG_NO_KNOWLEDGE_FALLBACK =
@@ -91,3 +91,4 @@ export async function executeRagAnswer(
     usedFallback: false, // 正常 RAG
   }; // 成功对象
 }
+

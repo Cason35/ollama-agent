@@ -1,19 +1,19 @@
-/**
+﻿/**
  * 第28天：本地知识库 Store — Memory-aware Retrieval Pipeline / Pipeline Metrics。
  */
 import { promises as fs } from "fs"; // 异步文件 IO
 import path from "path"; // 路径拼接
-import { buildChunksForDocument } from "@/lib/knowledge-chunking"; // overlap 切块
-import { embedTexts } from "@/lib/knowledge-embedding"; // 批量嵌入
+import { buildChunksForDocument } from "@/lib/knowledge/knowledge-chunking"; // overlap 切块
+import { embedTexts } from "@/lib/knowledge/knowledge-embedding"; // 批量嵌入
 import {
   retrieveTopChunks,
   DEFAULT_RETRIEVAL_TOP_K,
   DEFAULT_MIN_SCORE,
   DEFAULT_RECALL_K,
   DEFAULT_RETRIEVAL_MODE,
-} from "@/lib/knowledge-retrieval"; // 语义检索
-import { runRetrievalPipeline } from "@/lib/retrieval-pipeline"; // 第28天：Memory-aware 检索流水线
-import type { ModelRuntime } from "@/lib/model-runtime"; // 第28天：可选 LLM rewrite 运行时
+} from "@/lib/knowledge/knowledge-retrieval"; // 语义检索
+import { runRetrievalPipeline } from "@/lib/knowledge/retrieval-pipeline"; // 第28天：Memory-aware 检索流水线
+import type { ModelRuntime } from "@/lib/model/model-runtime"; // 第28天：可选 LLM rewrite 运行时
 import type {
   KnowledgeDocument,
   KnowledgeMetricsSnapshot,
@@ -22,7 +22,7 @@ import type {
   RetrievalMode,
   RetrieveOptions,
   RetrievedChunkHit,
-} from "@/lib/knowledge-types"; // 类型
+} from "@/lib/knowledge/knowledge-types"; // 类型
 
 /** 进程内单例文档表。 */
 const documents = new Map<string, KnowledgeDocument>(); // id → 文档
@@ -284,3 +284,4 @@ export const knowledgeStore = {
   getMetrics: getKnowledgeMetrics,
   getLastRetrieval: getLastRetrievalDebug,
 };
+

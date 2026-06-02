@@ -1,4 +1,4 @@
-# Day 28 学习总结：Memory-aware Retrieval Pipeline（记忆感知检索流水线）
+﻿# Day 28 学习总结：Memory-aware Retrieval Pipeline（记忆感知检索流水线）
 
 本文档记录 `ollama-chat-day28` 项目的学习理解、关键问答、与 `ollama-chat-day27` 的对比、为什么这样设计，以及第 28 天打卡结果。
 
@@ -145,7 +145,7 @@ day28 新增了 `runRetrievalPipeline()`，把原本分散的 RAG 主流程整�
 关键文件：
 
 ```text
-lib/retrieval-pipeline.ts
+lib/knowledge/retrieval-pipeline.ts
 ```
 
 ---
@@ -216,11 +216,11 @@ day28 可以理解为：
 
 | 文件 | 作用 |
 |---|---|
-| `lib/query-rewrite.ts` | Query Rewrite（查询改写）、ambiguous query detector（模糊查询检测器）、LLM rewrite（大模型查询改写） |
-| `lib/retrieval-pipeline.ts` | Retrieval Pipeline（检索流水线）主流程 |
-| `lib/knowledge-retrieval.ts` | Multi-Query Retrieval（多查询检索）、Hybrid Search（混合检索）、Rerank（重排） |
-| `lib/knowledge-store.ts` | Knowledge Store（知识库存储）、指标统计、最近一次检索调试数据 |
-| `lib/workflow-tools.ts` | Tool Registry（工具注册表）中的 queryRewrite / retrieval / ragAnswer 工具 |
+| `lib/knowledge/query-rewrite.ts` | Query Rewrite（查询改写）、ambiguous query detector（模糊查询检测器）、LLM rewrite（大模型查询改写） |
+| `lib/knowledge/retrieval-pipeline.ts` | Retrieval Pipeline（检索流水线）主流程 |
+| `lib/knowledge/knowledge-retrieval.ts` | Multi-Query Retrieval（多查询检索）、Hybrid Search（混合检索）、Rerank（重排） |
+| `lib/knowledge/knowledge-store.ts` | Knowledge Store（知识库存储）、指标统计、最近一次检索调试数据 |
+| `lib/workflow/workflow-tools.ts` | Tool Registry（工具注册表）中的 queryRewrite / retrieval / ragAnswer 工具 |
 | `app/components/KnowledgeSidebar.tsx` | RAG Debug Panel V5（RAG 调试面板 V5） |
 | `day28_test_cases.md` | 第 28 天测试用例文档 |
 
@@ -287,7 +287,7 @@ day28：让 RAG 先结合记忆和上下文想清楚“用户到底想找什么�
 
 **回答整理：**
 
-是的，现在 day28 里判断“用户问题是否模糊”，主要靠两条规则，在 `lib/query-rewrite.ts` 中：
+是的，现在 day28 里判断“用户问题是否模糊”，主要靠两条规则，在 `lib/knowledge/query-rewrite.ts` 中：
 
 ```ts
 const AMBIGUOUS_WORDS = ["它", "这个", "那个", "之前", "刚刚", "区别", "继续", "上面", "前面"];
@@ -378,3 +378,4 @@ day28 的核心不是让系统“多查几遍”，而是让系统在检索前�
 好的 RAG（检索增强生成）不只是检索知识，
 而是先理解用户到底想检索什么。
 ```
+

@@ -1,8 +1,8 @@
-/**
+﻿/**
  * 第24天：知识库 API — GET 列表/指标；POST 导入笔记。
  */
-import { API_CODE, apiJsonError, apiJsonSuccess } from "@/lib/api-envelope"; // 统一响应
-import { getLastRetrievalDebug, knowledgeStore } from "@/lib/knowledge-store"; // 知识库门面 + 最近检索
+import { API_CODE, apiJsonError, apiJsonSuccess } from "@/lib/api/api-envelope"; // 统一响应
+import { getLastRetrievalDebug, knowledgeStore } from "@/lib/knowledge/knowledge-store"; // 知识库门面 + 最近检索
 
 /** GET — 返回文档摘要、指标、最近一次检索（RAG Debug）。 */
 export async function GET() {
@@ -44,3 +44,4 @@ export async function POST(req: Request) {
     return apiJsonError(API_CODE.INTERNAL, API_CODE.INTERNAL, msg); // 服务端错误（如 Ollama 未启动）
   }
 }
+

@@ -1,8 +1,8 @@
-/**
+﻿/**
  * 聊天 API 专用类型（Memory 与 workflow-types 共享）。
  */
 
-import type { Memory } from "@/lib/workflow-types";
+import type { Memory } from "@/lib/workflow/workflow-types";
 
 export type { Memory };
 
@@ -39,7 +39,7 @@ export type ChatResponseBody =
   | { type: "todo"; items: TodoItem[]; memory: Memory }
   | {
       type: "workflow";
-      workflow: import("@/lib/workflow-types").Workflow;
+      workflow: import("@/lib/workflow/workflow-types").Workflow;
       finalSummary: string;
       memory: Memory;
       paused?: boolean;
@@ -53,10 +53,11 @@ export type ChatResponsePayload =
   | { type: "todo"; items: TodoItem[] }
   | {
       type: "workflow";
-      workflow: import("@/lib/workflow-types").Workflow;
+      workflow: import("@/lib/workflow/workflow-types").Workflow;
       finalSummary: string;
       paused?: boolean;
       waitingStepId?: string;
     };
 
 export type IncomingMemoryPayload = Partial<Memory> & { longTerm?: string };
+

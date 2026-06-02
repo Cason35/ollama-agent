@@ -1,10 +1,10 @@
-"use client"; // 侧栏包含输入框、按钮和动态列表，需要客户端渲染
+﻿"use client"; // 侧栏包含输入框、按钮和动态列表，需要客户端渲染
 
 import type { Dispatch, SetStateAction } from "react"; // 引入 React 状态 setter 类型
-import type { KnowledgeMetricsSnapshot, QueryRewriteDebug, RetrievalMode, RetrievedChunkHit } from "@/lib/knowledge-types"; // 引入 RAG 类型
-import type { ToolDescriptor, ToolMetricsSnapshot } from "@/lib/tool-registry"; // 引入工具描述与指标类型
-import type { WorkflowStorageMode } from "@/lib/workflow-store"; // 引入工作流存储模式类型
-import type { WorkflowStateListItem } from "@/lib/workflow-types"; // 引入工作流历史摘要类型
+import type { KnowledgeMetricsSnapshot, QueryRewriteDebug, RetrievalMode, RetrievedChunkHit } from "@/lib/knowledge/knowledge-types"; // 引入 RAG 类型
+import type { ToolDescriptor, ToolMetricsSnapshot } from "@/lib/tools/tool-registry"; // 引入工具描述与指标类型
+import type { WorkflowStorageMode } from "@/lib/workflow/workflow-store"; // 引入工作流存储模式类型
+import type { WorkflowStateListItem } from "@/lib/workflow/workflow-types"; // 引入工作流历史摘要类型
 
 /** 侧栏展示所需的长期记忆条目。 */
 type SidebarMemoryItem = {
@@ -80,13 +80,13 @@ export function KnowledgeSidebar({
   memory,
 }: KnowledgeSidebarProps) {
   return (
-    <aside className="flex min-h-[260px] w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-zinc-200/80 bg-white/70 shadow-lg shadow-zinc-900/5 ring-1 ring-white/50 backdrop-blur-md dark:border-zinc-800/90 dark:bg-zinc-900/65 dark:shadow-black/30 dark:ring-zinc-700/40 lg:h-[calc(100dvh-11rem)] lg:w-[300px] xl:w-[320px]">
-      <div className="border-b border-emerald-200/70 px-4 py-4 dark:border-emerald-900/40">
+    <aside className="flex min-h-0 w-full shrink-0 flex-col overflow-y-auto overflow-x-hidden rounded-xl border border-zinc-200/80 bg-white/78 shadow-lg shadow-zinc-900/5 ring-1 ring-white/50 backdrop-blur-md dark:border-zinc-800/90 dark:bg-zinc-900/65 dark:shadow-black/30 dark:ring-zinc-700/40 lg:h-full lg:w-[320px] xl:w-[340px]">
+      <div className="shrink-0 border-b border-emerald-200/70 px-4 py-3 dark:border-emerald-900/40">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Tool Explorer</h2>
         <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
           第28天：retrieval / ragAnswer（RAG V5：Memory-aware Pipeline + Query Rewrite + Multi-Query + Rerank）。
         </p>
-        <ul className="mt-3 max-h-56 space-y-2 overflow-y-auto">
+        <ul className="mt-3 max-h-48 space-y-2 overflow-y-auto overflow-x-hidden pr-1">
           {registeredTools.length === 0 ? (
             <li className="rounded-lg border border-dashed border-zinc-200 px-2 py-3 text-center text-[11px] text-zinc-400 dark:border-zinc-700">
               加载中或暂无工具…
@@ -97,19 +97,19 @@ export function KnowledgeSidebar({
               return (
                 <li
                   key={tool.name}
-                  className="rounded-lg border border-emerald-200/80 bg-emerald-50/60 px-2.5 py-2 text-xs dark:border-emerald-800/50 dark:bg-emerald-950/25"
+                  className="min-w-0 overflow-hidden rounded-lg border border-emerald-200/80 bg-emerald-50/60 px-2.5 py-2 text-xs dark:border-emerald-800/50 dark:bg-emerald-950/25"
                 >
-                  <p className="font-mono font-semibold text-emerald-900 dark:text-emerald-100">{tool.name}</p>
-                  <p className="mt-0.5 text-[11px] leading-snug text-emerald-800/90 dark:text-emerald-200/90">
+                  <p className="break-all font-mono font-semibold text-emerald-900 dark:text-emerald-100">{tool.name}</p>
+                  <p className="mt-0.5 break-words text-[11px] leading-snug text-emerald-800/90 dark:text-emerald-200/90">
                     {tool.description}
                   </p>
                   {tool.capabilities?.length ? (
-                    <p className="mt-1 text-[10px] text-emerald-800/90 dark:text-emerald-200/90">
+                    <p className="mt-1 break-words text-[10px] text-emerald-800/90 dark:text-emerald-200/90">
                       能力: {tool.capabilities.join(", ")}
                     </p>
                   ) : null}
                   {tool.dependencies?.length ? (
-                    <div className="mt-1 font-mono text-[10px] text-emerald-700/90 dark:text-emerald-300/90">
+                    <div className="mt-1 break-all font-mono text-[10px] text-emerald-700/90 dark:text-emerald-300/90">
                       <p>{tool.name}</p>
                       {tool.dependencies.map((dep) => (
                         <p key={dep} className="pl-3">
@@ -119,22 +119,22 @@ export function KnowledgeSidebar({
                     </div>
                   ) : null}
                   {tool.subTools?.length ? (
-                    <p className="mt-0.5 font-mono text-[10px] text-emerald-700/80 dark:text-emerald-300/80">
+                    <p className="mt-0.5 break-all font-mono text-[10px] text-emerald-700/80 dark:text-emerald-300/80">
                       组合: {tool.subTools.join(" → ")}
                     </p>
                   ) : null}
                   {m ? (
-                    <p className="mt-1 font-mono text-[10px] text-amber-800/90 dark:text-amber-200/90">
+                    <p className="mt-1 break-all font-mono text-[10px] text-amber-800/90 dark:text-amber-200/90">
                       calls: {m.totalCalls}, ok: {m.successCalls}, fail: {m.failedCalls}, avg: {m.avgDurationMs}ms
                     </p>
                   ) : null}
                   {tool.inputSchema ? (
-                    <p className="mt-1 font-mono text-[10px] text-emerald-700/80 dark:text-emerald-300/80">
+                    <p className="mt-1 break-all font-mono text-[10px] text-emerald-700/80 dark:text-emerald-300/80">
                       in: {JSON.stringify(tool.inputSchema)}
                     </p>
                   ) : null}
                   {tool.outputSchema ? (
-                    <p className="font-mono text-[10px] text-emerald-700/80 dark:text-emerald-300/80">
+                    <p className="break-all font-mono text-[10px] text-emerald-700/80 dark:text-emerald-300/80">
                       out: {JSON.stringify(tool.outputSchema)}
                     </p>
                   ) : null}
@@ -145,7 +145,7 @@ export function KnowledgeSidebar({
         </ul>
       </div>
 
-      <div className="border-b border-sky-200/70 px-4 py-4 dark:border-sky-900/40">
+      <div className="shrink-0 border-b border-sky-200/70 px-4 py-3 dark:border-sky-900/40">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">RAG 知识库</h2>
         <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
           第28天：RAG V5 · Memory-aware Query Rewrite · Pipeline · vector/keyword/hybrid · Rerank。
@@ -191,7 +191,7 @@ export function KnowledgeSidebar({
         <p className="mt-2 text-[11px] text-zinc-500">已导入 {knowledgeDocCount} 篇文档</p>
       </div>
 
-      <div className="border-b border-amber-200/70 px-4 py-4 dark:border-amber-900/40">
+      <div className="shrink-0 border-b border-amber-200/70 px-4 py-3 dark:border-amber-900/40">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">RAG Debug Panel</h2>
         <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
           第28天：Original Query · Ambiguous · Rewrite Mode · Memory/Recent/Topics · Pipeline Metrics
@@ -397,3 +397,4 @@ export function KnowledgeSidebar({
     </aside>
   );
 }
+

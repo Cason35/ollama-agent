@@ -1,10 +1,10 @@
-/**
+﻿/**
  * 第28天：Retrieval Pipeline —— Memory-aware Query Rewrite + Multi-Query Retrieval。
  */
-import type { ModelRuntime } from "@/lib/model-runtime"; // 引入模型运行时类型
-import { retrieveWithQueries } from "@/lib/knowledge-retrieval"; // 引入可控 queries 的多查询检索入口
-import { isAmbiguousQuery, rewriteQueryByRules, rewriteQueryWithFallback, rewriteQueryWithLlm } from "@/lib/query-rewrite"; // 引入改写策略
-import type { KnowledgeDocument, PipelineMetrics, RetrievalMemoryItem, RetrievalRecentMessage, RetrieveOptions, RetrievedChunkHit } from "@/lib/knowledge-types"; // 引入检索相关类型
+import type { ModelRuntime } from "@/lib/model/model-runtime"; // 引入模型运行时类型
+import { retrieveWithQueries } from "@/lib/knowledge/knowledge-retrieval"; // 引入可控 queries 的多查询检索入口
+import { isAmbiguousQuery, rewriteQueryByRules, rewriteQueryWithFallback, rewriteQueryWithLlm } from "@/lib/knowledge/query-rewrite"; // 引入改写策略
+import type { KnowledgeDocument, PipelineMetrics, RetrievalMemoryItem, RetrievalRecentMessage, RetrieveOptions, RetrievedChunkHit } from "@/lib/knowledge/knowledge-types"; // 引入检索相关类型
 
 /** 第28天：Pipeline 输入结构。 */
 export type RetrievalPipelineInput = {
@@ -112,3 +112,4 @@ export async function runRetrievalPipeline(input: RetrievalPipelineInput): Promi
     },
   }; // 返回完整 pipeline 结果
 }
+

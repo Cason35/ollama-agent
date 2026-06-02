@@ -1,15 +1,15 @@
-/**
+﻿/**
  * 第18天：服务端暂存「因 HITL 暂停」的工作流上下文，供 POST /api/workflow/confirm 恢复执行。
  * 每行带中文行尾注释；进程内 Map（开发/demo 足够，生产应换 Redis 等持久化）。
  */
 
-import type { Memory } from "@/lib/workflow-types"; // 记忆结构类型（与 chat route 共享）
+import type { Memory } from "@/lib/workflow/workflow-types"; // 记忆结构类型（与 chat route 共享）
 
 /** 暂停时需保留的执行续跑上下文（不含密钥，confirm 请求会重建 ModelRuntime）。 */
 export type PausedWorkflowContext = {
-  workflow: import("@/lib/workflow-types").Workflow; // 含 waiting_confirmation 步骤的完整工作流快照
+  workflow: import("@/lib/workflow/workflow-types").Workflow; // 含 waiting_confirmation 步骤的完整工作流快照
   memory: Memory; // 本轮对话记忆：续跑时注入工具链
-  timeline: import("@/lib/workflow-types").WorkflowTimelineEvent[]; // 与 executionTimeline 共享引用，便于追加 HITL 事件
+  timeline: import("@/lib/workflow/workflow-types").WorkflowTimelineEvent[]; // 与 executionTimeline 共享引用，便于追加 HITL 事件
   defaultStepRetries: number; // 全局默认步骤重试次数，与首次 execute 一致
 }; // PausedWorkflowContext 结束
 
@@ -40,3 +40,4 @@ export function loadPausedWorkflow(workflowId: string): PausedWorkflowContext | 
 export function deletePausedWorkflow(workflowId: string): void {
   getPausedMap().delete(workflowId); // 释放内存条目
 } // deletePausedWorkflow 结束
+

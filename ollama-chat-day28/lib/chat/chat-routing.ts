@@ -1,8 +1,8 @@
-/**
+﻿/**
  * 意图路由：解析模型 JSON、延续语义修正、路由 system 提示词。
  */
-import type { Action, Memory, ParsedOutput } from "@/lib/chat-types";
-import { formatMemoryBlock } from "@/lib/chat-memory";
+import type { Action, Memory, ParsedOutput } from "@/lib/chat/chat-types";
+import { formatMemoryBlock } from "@/lib/chat/chat-memory";
 
 export function logAgent(event: string, payload: Record<string, unknown>) {
   console.log(`[Agent] ${event}`, payload);
@@ -104,3 +104,4 @@ export function resolveContinuationAction(latestUser: string, parsed: ParsedOutp
 
   return "todo"; // 默认偏向待办延续
 }
+

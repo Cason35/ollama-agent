@@ -1,9 +1,9 @@
-/**
+﻿/**
  * Ollama / 小米 MiMo 模型运行时与统一补全调用。
  */
 
-import { API_REASON, apiJsonReasonError } from "@/lib/api-envelope";
-import { MIMO_MODEL_IDS, type MimoModelId } from "@/lib/mimo-models";
+import { API_REASON, apiJsonReasonError } from "@/lib/api/api-envelope";
+import { MIMO_MODEL_IDS, type MimoModelId } from "@/lib/model/mimo-models";
 
 export const DEFAULT_OLLAMA_API_URL = "http://localhost:11434/api/chat";
 export const DEFAULT_OLLAMA_MODEL = "qwen2.5:14b";
@@ -148,3 +148,4 @@ export function buildModelRuntime(
   };
   return { rt, errorResponse: null };
 }
+

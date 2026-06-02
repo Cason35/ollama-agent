@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 第19天：POST /api/workflow/confirm —— HITL 确认/取消；支持 resumeContext 刷新后续跑。
  * 每行带中文行尾注释。
  */
@@ -9,20 +9,20 @@ import {
   apiJsonFailOk,
   apiJsonReasonError,
   apiJsonSuccess,
-} from "@/lib/api-envelope"; // 统一响应包
+} from "@/lib/api/api-envelope"; // 统一响应包
 import {
   applyWorkflowUserCancel,
   continueWorkflow,
   synthesizeWorkflowResult,
   WORKFLOW_DEFAULT_STEP_RETRIES,
-} from "@/lib/workflow-executor";
+} from "@/lib/workflow/workflow-executor";
 import {
   deletePausedWorkflow,
   loadPausedWorkflow,
   savePausedWorkflow,
-} from "@/lib/workflow-pause-store"; // 暂停上下文读写
-import type { Memory, Workflow, WorkflowTimelineEvent } from "@/lib/workflow-types"; // 记忆与工作流类型
-import { buildModelRuntime } from "@/lib/model-runtime";
+} from "@/lib/workflow/workflow-pause-store"; // 暂停上下文读写
+import type { Memory, Workflow, WorkflowTimelineEvent } from "@/lib/workflow/workflow-types"; // 记忆与工作流类型
+import { buildModelRuntime } from "@/lib/model/model-runtime";
 
 /** POST：用户确认或取消 HITL 步骤。 */
 export async function POST(req: Request) {
@@ -169,3 +169,4 @@ export async function POST(req: Request) {
     return apiJsonReasonError(API_REASON.INTERNAL, msg); // 500
   } // try/catch
 } // POST 结束
+

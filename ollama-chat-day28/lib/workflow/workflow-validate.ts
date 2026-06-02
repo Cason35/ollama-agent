@@ -1,12 +1,12 @@
-/**
+﻿/**
  * Workflow 静态校验与自动修复。
  */
-import type { Workflow, WorkflowStep, WorkflowStepAction } from "@/lib/workflow-types";
+import type { Workflow, WorkflowStep, WorkflowStepAction } from "@/lib/workflow/workflow-types";
 import {
   topologicalSortWorkflowSteps,
   normalizeWorkflowAction,
   WORKFLOW_ALLOWED_ACTIONS,
-} from "@/lib/workflow-planner";
+} from "@/lib/workflow/workflow-planner";
 
 function kahnWorkflowTopology(steps: WorkflowStep[]): {
   acyclic: boolean; // true 表示所有节点都能被 Kahn 弹出（即无环）
@@ -222,3 +222,4 @@ export function repairWorkflow(workflow: Workflow): Workflow {
 export function topologicalSort(steps: WorkflowStep[]): WorkflowStep[] {
   return topologicalSortWorkflowSteps(steps); // 委托：仍使用依赖图 + 环兜底策略
 } // topologicalSort 包装结束
+

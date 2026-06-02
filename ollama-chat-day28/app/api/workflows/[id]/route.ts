@@ -1,4 +1,4 @@
-/**
+﻿/**
 
  * 第21天：单条 Workflow API — GET / DELETE（MySQL 持久化）。
 
@@ -18,9 +18,9 @@ import {
 
   apiJsonSuccess,
 
-} from "@/lib/api-envelope"; // 统一响应包
+} from "@/lib/api/api-envelope"; // 统一响应包
 
-import { dbDeleteWorkflow, dbGetWorkflow } from "@/lib/workflow-db"; // MySQL 委托层
+import { dbDeleteWorkflow, dbGetWorkflow } from "@/lib/workflow/workflow-db"; // MySQL 委托层
 
 
 
@@ -97,5 +97,6 @@ export async function DELETE(_request: Request, context: RouteContext) {
   } // catch
 
 } // DELETE 结束
+
 
 

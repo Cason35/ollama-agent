@@ -1,14 +1,14 @@
-/**
+﻿/**
  * 记忆管线：短期窗口、长期条目、压缩与 buildMemory。
  */
-import { invokeChatModel, type ModelRuntime } from "@/lib/model-runtime";
+import { invokeChatModel, type ModelRuntime } from "@/lib/model/model-runtime";
 import type {
   ChatMessage,
   IncomingMemoryPayload,
   Memory,
   MemoryImportance,
   MemoryItem,
-} from "@/lib/chat-types";
+} from "@/lib/chat/chat-types";
 
 // ---------- 上下文与记忆体积限制 ----------
 
@@ -310,3 +310,4 @@ export async function buildMemory(
   modelMessages.push(...memory.shortTerm); // 追加短期对话
   return { memory, modelMessages }; // 返回记忆与模型输入
 }
+

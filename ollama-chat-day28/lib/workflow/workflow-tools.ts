@@ -1,33 +1,33 @@
-/**
+﻿/**
  * 第28天：注册 Workflow 运行时工具（含 Memory-aware RAG V5 扩展工具）。
  */
-import { formatMemoryForPlanner } from "@/lib/chat-memory"; // Planner 记忆格式化
+import { formatMemoryForPlanner } from "@/lib/chat/chat-memory"; // Planner 记忆格式化
 import {
   extractWeatherCity, // 天气城市解析
   generateTodosWithModel, // 待办生成
   getLatestUserText, // 最近用户文本
   realWeather, // 模拟天气 API
   summarizeWithModel, // 总结生成
-} from "@/lib/chat-tools";
-import { invokeChatModel, type ModelRuntime } from "@/lib/model-runtime"; // 模型调用
-import type { Memory, WorkflowStepAction } from "@/lib/workflow-types"; // 工作流类型
+} from "@/lib/chat/chat-tools";
+import { invokeChatModel, type ModelRuntime } from "@/lib/model/model-runtime"; // 模型调用
+import type { Memory, WorkflowStepAction } from "@/lib/workflow/workflow-types"; // 工作流类型
 import {
   ToolRegistry, // 注册表类
   type CompositeTool, // 组合工具类型
   type Tool, // 工具接口
   type WorkflowToolExecuteInput, // 执行入参
-} from "@/lib/tool-registry";
-import { runWorkflowChat, runWorkflowChatDirect } from "@/lib/workflow-chat"; // chat 实现（打破循环依赖）
-import { executeRagAnswer } from "@/lib/knowledge-rag"; // 第27天：RAG V4 + fallback
-import { knowledgeStore } from "@/lib/knowledge-store"; // 第24天：本地知识库
-import { rewriteQueryWithFallback } from "@/lib/query-rewrite"; // 第28天：Memory-aware Query Rewrite 工具逻辑
+} from "@/lib/tools/tool-registry";
+import { runWorkflowChat, runWorkflowChatDirect } from "@/lib/workflow/workflow-chat"; // chat 实现（打破循环依赖）
+import { executeRagAnswer } from "@/lib/knowledge/knowledge-rag"; // 第27天：RAG V4 + fallback
+import { knowledgeStore } from "@/lib/knowledge/knowledge-store"; // 第24天：本地知识库
+import { rewriteQueryWithFallback } from "@/lib/knowledge/query-rewrite"; // 第28天：Memory-aware Query Rewrite 工具逻辑
 import {
   DEFAULT_MIN_SCORE,
   DEFAULT_RECALL_K,
   DEFAULT_RETRIEVAL_MODE,
   DEFAULT_RETRIEVAL_TOP_K,
-} from "@/lib/knowledge-retrieval"; // 第27天：默认 recallK / topK / minScore / mode
-import { createWorkflowStore } from "@/lib/workflow-store"; // 历史 workflow 搜索
+} from "@/lib/knowledge/knowledge-retrieval"; // 第27天：默认 recallK / topK / minScore / mode
+import { createWorkflowStore } from "@/lib/workflow/workflow-store"; // 历史 workflow 搜索
 
 /** 第22天：Workflow 内 judge 步骤逻辑（结构化 JSON 输出）。 */
 async function runWorkflowJudge(args: {
@@ -434,3 +434,4 @@ export const workflowToolRegistry = createWorkflowToolRegistry(); // 模块加�
 export const WORKFLOW_ALLOWED_ACTIONS: ReadonlySet<WorkflowStepAction> = new Set(
   workflowToolRegistry.listNames() as WorkflowStepAction[] // 全部已注册 name
 );
+

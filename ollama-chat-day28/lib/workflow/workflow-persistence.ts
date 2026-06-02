@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 第19–22天：Workflow 持久化辅助（build/summary/恢复）；读写经 WorkflowStore。
  * 第22天：backend 模式保存前不再 GET，createdAt 由服务端 upsert 响应带回。
  * 每行带中文行尾注释。
@@ -12,13 +12,13 @@ import type {
   WorkflowPersistedStatus,
   WorkflowStep,
   WorkflowTimelineEvent,
-} from "@/lib/workflow-types"; // 类型
+} from "@/lib/workflow/workflow-types"; // 类型
 import type {
   WorkflowSaveMeta,
   WorkflowStorageMode,
   WorkflowStore,
-} from "@/lib/workflow-store"; // 存储接口与模式
-import { WORKFLOW_STATE_VERSION } from "@/lib/workflow-persistence-constants"; // 版本
+} from "@/lib/workflow/workflow-store"; // 存储接口与模式
+import { WORKFLOW_STATE_VERSION } from "@/lib/workflow/workflow-persistence-constants"; // 版本
 
 export {
   WORKFLOW_STATE_VERSION,
@@ -26,7 +26,7 @@ export {
   WORKFLOW_KEY_PREFIX,
   WORKFLOW_INDEX_KEY,
   WORKFLOW_STORAGE_MODE_KEY,
-} from "@/lib/workflow-persistence-constants"; // 再导出常量供页面使用
+} from "@/lib/workflow/workflow-persistence-constants"; // 再导出常量供页面使用
 
 /** 从步骤列表提取已成功步骤的 output 字典（任务 1 stepOutputs）。 */
 export function buildStepOutputsFromSteps(steps: WorkflowStep[]): Record<string, unknown> {
@@ -245,3 +245,4 @@ export function saveStorageModePreference(mode: "local" | "backend"): void {
   if (typeof window === "undefined") return; // SSR 跳过
   window.localStorage.setItem("workflow:storageMode", mode); // 写入偏好
 } // saveStorageModePreference 结束
+

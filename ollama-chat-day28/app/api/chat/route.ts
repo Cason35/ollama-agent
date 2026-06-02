@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Next.js App Router：`POST /api/chat` —— 带记忆与工具路由的聊天接口。
  *
  * 注释约定：可执行代码行尽量带行尾「//」中文说明。
@@ -16,20 +16,20 @@ import {
   API_REASON,
   apiJsonReasonError,
   apiJsonSuccess,
-} from "@/lib/api-envelope"; // 统一响应包
-import { buildMemory, memoryItemsCharLength } from "@/lib/chat-memory"; // 记忆管线与长期条目字符统计
+} from "@/lib/api/api-envelope"; // 统一响应包
+import { buildMemory, memoryItemsCharLength } from "@/lib/chat/chat-memory"; // 记忆管线与长期条目字符统计
 import {
   buildRoutingSystemPrompt, // 路由专用 system 提示词
   logAgent, // Agent 结构化日志
   parseModelOutput, // 解析路由模型 JSON 输出
   resolveContinuationAction, // 「继续上次」等延续语义修正 action
-} from "@/lib/chat-routing";
+} from "@/lib/chat/chat-routing";
 import type {
   ChatMessage, // 单条 user/assistant 消息
   ChatResponseBody, // 含 memory 的完整响应体
   ChatResponsePayload, // 不含 memory 的业务负载（供 withMemory 组装）
   IncomingMemoryPayload, // 请求体 memory 字段（兼容旧 longTerm）
-} from "@/lib/chat-types";
+} from "@/lib/chat/chat-types";
 import {
   extractWeatherCity, // 从用户话术中解析城市名
   generateFallbackChat, // 路由 content 为空时的第二轮闲聊
@@ -37,19 +37,19 @@ import {
   getLatestUserText, // 取最近一条 user 消息
   realWeather, // Open-Meteo 天气查询
   summarizeWithModel, // 总结分支：要点列表
-} from "@/lib/chat-tools";
-import { buildModelRuntime, invokeChatModel } from "@/lib/model-runtime"; // 模型运行时与统一补全
-import { savePausedWorkflow } from "@/lib/workflow-pause-store"; // 第18天：HITL 暂停上下文写入
+} from "@/lib/chat/chat-tools";
+import { buildModelRuntime, invokeChatModel } from "@/lib/model/model-runtime"; // 模型运行时与统一补全
+import { savePausedWorkflow } from "@/lib/workflow/workflow-pause-store"; // 第18天：HITL 暂停上下文写入
 import {
   WORKFLOW_DEFAULT_STEP_RETRIES, // 步骤默认额外重试次数（confirm 续跑复用）
   applyWorkflowUserCancel, // 第18天：用户取消关键步（策略 A）
   executeWorkflow, // 并行 DAG 执行器
   synthesizeWorkflowResult, // 工作流成功后的最终自然语言汇总
-} from "@/lib/workflow-executor";
-import { logWorkflow } from "@/lib/workflow-log"; // Workflow 专用日志
-import { planWorkflowSteps } from "@/lib/workflow-planner"; // Planner：拆分为多步
-import { repairWorkflow, topologicalSort, validateWorkflow } from "@/lib/workflow-validate"; // 静态校验与修复
-import type { Workflow, WorkflowTimelineEvent } from "@/lib/workflow-types"; // 工作流容器与时间线事件
+} from "@/lib/workflow/workflow-executor";
+import { logWorkflow } from "@/lib/workflow/workflow-log"; // Workflow 专用日志
+import { planWorkflowSteps } from "@/lib/workflow/workflow-planner"; // Planner：拆分为多步
+import { repairWorkflow, topologicalSort, validateWorkflow } from "@/lib/workflow/workflow-validate"; // 静态校验与修复
+import type { Workflow, WorkflowTimelineEvent } from "@/lib/workflow/workflow-types"; // 工作流容器与时间线事件
 
 /** 供 confirm API 等同模块导入，避免从 route 拉取整文件实现。 */
 export {
@@ -303,3 +303,4 @@ export async function POST(req: Request) {
     return apiJsonReasonError(API_REASON.INTERNAL); // 对外统一 500
   }
 } // POST 结束
+

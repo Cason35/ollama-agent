@@ -1,12 +1,12 @@
-/**
+﻿/**
  * 第20–22天：BackendWorkflowStore — 通过 /api/workflows 访问服务端 MySQL。
  * 第22天：save 解析 POST 响应中的 created / createdAt，供持久化层写回 state。
  * 每行带中文行尾注释。
  */
 
-import { assertApiOk, readApiData, readApiDataOrNull } from "@/lib/api-client"; // 解析统一响应包
-import type { WorkflowState } from "@/lib/workflow-types"; // 快照类型
-import type { WorkflowSaveMeta, WorkflowStore } from "@/lib/workflow-store"; // 存储接口与 save 元数据
+import { assertApiOk, readApiData, readApiDataOrNull } from "@/lib/api/api-client"; // 解析统一响应包
+import type { WorkflowState } from "@/lib/workflow/workflow-types"; // 快照类型
+import type { WorkflowSaveMeta, WorkflowStore } from "@/lib/workflow/workflow-store"; // 存储接口与 save 元数据
 
 /** POST /api/workflows 成功时 data 形状（第22天扩展）。 */
 type WorkflowPostData = {
@@ -66,4 +66,5 @@ export class BackendWorkflowStore implements WorkflowStore {
     return typeof data.removed === "number" ? data.removed : 0; // 默认 0
   } // purgeExpired 结束
 } // BackendWorkflowStore 结束
+
 

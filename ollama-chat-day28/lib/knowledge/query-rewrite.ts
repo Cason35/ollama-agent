@@ -1,8 +1,8 @@
-/**
+﻿/**
  * 第28天：Memory-aware Query Rewrite —— 规则兜底 + LLM 上下文改写。
  */
-import { invokeChatModel, type ModelRuntime } from "@/lib/model-runtime"; // 引入模型调用函数与运行时类型
-import type { RetrievalMemoryItem, RetrievalRecentMessage } from "@/lib/knowledge-types"; // 引入检索上下文类型
+import { invokeChatModel, type ModelRuntime } from "@/lib/model/model-runtime"; // 引入模型调用函数与运行时类型
+import type { RetrievalMemoryItem, RetrievalRecentMessage } from "@/lib/knowledge/knowledge-types"; // 引入检索上下文类型
 
 /** Query Rewrite 工具输出结构。 */
 export type QueryRewriteResult = {
@@ -174,3 +174,4 @@ export async function rewriteQueryWithFallback(
     strategy: llmQueries.length === 1 ? "llm-fallback-rule" : "rule", // 标记回退原因
   }; // 返回兜底结果
 }
+

@@ -1,7 +1,7 @@
-/**
+﻿/**
  * 第25天：文本切块 — overlap 滑动窗口 + chunk metadata。
  */
-import type { KnowledgeChunk } from "@/lib/knowledge-types"; // 块类型
+import type { KnowledgeChunk } from "@/lib/knowledge/knowledge-types"; // 块类型
 
 /** 默认切块字符长度（与学习计划一致）。 */
 export const DEFAULT_CHUNK_SIZE = 500; // 每块最多 500 字符
@@ -73,3 +73,4 @@ export function buildChunksForDocument(
     }; // 单块对象
   }); // 映射为 KnowledgeChunk[]
 }
+
