@@ -1,6 +1,6 @@
 # Day 30 学习总结：RAG Runtime V7（RAG 运行时 V7）+ Vector Database Layer（向量数据库层）
 
-本文档记录 `ollama-chat-day30` 项目做了什么、运用了什么知识、相比 `ollama-chat-day29` 有什么改进、为什么这样设计，以及本次学习对话整理和第30天打卡结果。
+本文档记录 `ollama-chat-day30` 项目做了什么、运用了什么知识、相比 `ollama-chat-day29` 有什么改进、为什么这样设计，以及本次学习对话整理、第 30 天打卡结果、第 30 天阶段总结与路线进度，以及第 31 天（Queue Runtime V1，队列运行时 V1）学习计划。
 
 ---
 
@@ -636,7 +636,423 @@ RAG Runtime V7（RAG 运行时 V7）
 
 ---
 
-## 8. 一句话总结
+## 8. 第 30 天阶段总结
+
+### 8.1 你第 30 天完成了什么
+
+第 30 天完成的是：
+
+**RAG Runtime V7（RAG 运行时 V7）：Knowledge Infrastructure（知识基础设施）**
+
+这一步非常重要。
+
+因为你已经完成了 Agent（智能体）工程里最容易被忽略的一层：
+
+**Knowledge Layer（知识层）**
+
+很多教程做到：
+
+```text
+Embedding（向量化）
+↓
+Vector Search（向量检索）
+```
+
+就结束了。
+
+但你已经继续完成：
+
+| 能力 | 说明 |
+|---|---|
+| VectorStore（向量存储） | 统一向量读写与查询接口 |
+| KnowledgeStore（知识库存储） | 文档与 chunk（文本片段）管理 |
+| Store Separation（存储分离） | 文档层与向量层解耦 |
+| Metadata Filter（元数据过滤） | 按 documentId 等条件过滤检索 |
+| Vector Explorer（向量浏览器） | 可视化向量记录 |
+| Benchmark（基准测试） | 可观测索引与检索性能 |
+| Incremental Indexing（增量索引） | 文档变化时少重复算 embedding |
+| Embedding Cache（向量缓存） | 复用已生成的 embedding |
+
+这意味着：
+
+你已经开始进入：
+
+**AI Infrastructure Engineer（AI 基础设施工程师）**
+
+而不仅仅是 **Agent Developer（智能体开发者）**。
+
+### 8.2 当前进度定位（按 100 天路线）
+
+若整个路线按 100 天来算：
+
+```text
+Agent 基础（智能体基础）                ██████████ 100%
+Workflow Runtime（工作流运行时）         ██████████ 100%
+Tool Ecosystem（工具生态）               █████████░  90%
+RAG Runtime（RAG 运行时）                █████████░  90%
+Knowledge Infrastructure（知识基础设施） ████████░░  80%
+Queue / Worker（队列 / 工作进程）         ░░░░░░░░░░   0%
+Multi-Agent（多智能体）                  ░░░░░░░░░░   0%
+Production Infra（生产基础设施）          ░░░░░░░░░░   0%
+```
+
+你已经完成整个路线大约 **65% ~ 70%**。
+
+接下来要进入：
+
+**Execution Infrastructure（执行基础设施）**
+
+也就是：
+
+**Queue + Worker Runtime（队列 + 工作进程运行时）**
+
+---
+
+## 9. 第 31 天学习计划
+
+### 9.1 Queue Runtime V1（队列运行时 V1）：Job Queue（任务队列）基础
+
+#### 今天核心目标
+
+让你的 Workflow（工作流）从：
+
+```text
+同步执行（Synchronous Execution，请求线程内直接跑完）
+```
+
+升级成：
+
+```text
+异步任务系统（Asynchronous Task System，请求只创建任务，后台执行）
+```
+
+#### 为什么必须学这个？
+
+现在你的 Runtime（运行时）大致是：
+
+```text
+用户发请求
+↓
+Workflow（工作流）开始
+↓
+Workflow 执行
+↓
+返回结果
+```
+
+问题在于：如果未来要跑：
+
+```text
+分析 100 页 PDF
+导入 5000 个 chunks（文本片段）
+Research Agent（研究型智能体）
+Multi-Agent（多智能体协作）
+```
+
+执行 30 秒怎么办？
+
+HTTP（超文本传输协议）请求会 **超时（Timeout）**。
+
+所以真实 Agent（智能体）平台通常是：
+
+```text
+用户请求
+↓
+创建 Job（后台任务）
+↓
+进入 Queue（队列）
+↓
+Worker（工作进程）执行
+↓
+状态更新（Status Update）
+```
+
+#### 第 31 天最终效果
+
+用户说：
+
+> 帮我分析整个知识库
+
+系统返回：
+
+```text
+Job Created（任务已创建）
+
+Job ID（任务 ID）:
+job_12345
+
+Status（状态）:
+queued（排队中）
+```
+
+后台：
+
+```text
+Worker（工作进程）
+↓
+执行
+↓
+完成
+```
+
+前端实时展示状态流转：
+
+```text
+queued（排队中）
+→ running（执行中）
+→ success（成功）
+```
+
+---
+
+### 9.2 任务清单
+
+#### 任务 1：理解 Queue（队列）架构
+
+今天先不要 Redis（内存键值存储，常用于分布式队列）。
+
+先做 **Local Queue（本地队列）**：
+
+```text
+User（用户）
+↓
+Queue（队列）
+↓
+Worker（工作进程）
+↓
+Result（结果）
+```
+
+#### 任务 2：定义 Job（后台任务）
+
+新增类型：
+
+```ts
+type Job = {
+  id: string
+
+  type: string
+
+  payload: unknown
+
+  status:
+    | "queued"    // 排队中
+    | "running"   // 执行中
+    | "success"   // 成功
+    | "failed"    // 失败
+
+  result?: unknown
+
+  error?: string
+
+  createdAt: number
+
+  startedAt?: number
+
+  completedAt?: number
+}
+```
+
+#### 任务 3：实现 JobStore（任务存储）
+
+新增接口：
+
+```ts
+interface JobStore {
+  create(job)
+  get(id)
+  update(job)
+  list()
+}
+```
+
+**推荐**：直接使用 **MySQL（关系型数据库）**，因为你已经有 **WorkflowStore（工作流存储）** 了。
+
+新增表：`jobs`
+
+#### 任务 4：实现 QueueManager（队列管理器）
+
+新增：
+
+```ts
+class QueueManager
+```
+
+内部方法：
+
+- `enqueue(job)`：入队
+- `dequeue()`：出队
+- `peek()`：查看队首（不出队）
+
+今天先用 **array（数组）** 实现即可。
+
+#### 任务 5：实现 Worker（工作进程）
+
+新增：
+
+```ts
+class Worker
+```
+
+核心方法：
+
+- `start()`：启动轮询
+- `process(job)`：处理单个任务
+
+循环可用 `setInterval(...)` 实现。
+
+示例：
+
+```ts
+worker.start()
+```
+
+持续：**取任务 → 执行任务 → 更新状态**。
+
+#### 任务 6：Job Executor（任务执行器）
+
+新增 **JobType（任务类型）**，例如：
+
+```text
+workflow（工作流）
+retrieval（检索）
+embedding（向量化）
+reindex（重建索引）
+```
+
+Worker 内 `switch(job.type)`，分别调用：
+
+- `WorkflowRuntime（工作流运行时）`
+- `KnowledgeRuntime（知识运行时）`
+
+#### 任务 7：Queue Dashboard（队列看板）
+
+新增页面 **Queue Dashboard（队列看板）**，展示：
+
+```text
+Queued（排队中）
+Running（执行中）
+Success（成功）
+Failed（失败）
+```
+
+表格列：
+
+| 列 | 说明 |
+|---|---|
+| Job ID（任务 ID） | 唯一标识 |
+| Type（类型） | workflow / embedding 等 |
+| Status（状态） | queued / running / success / failed |
+| Duration（耗时） | 开始到结束的时长 |
+
+#### 任务 8：Job Timeline（任务时间线）
+
+类似 **Workflow Timeline（工作流时间线）**，新增 **Job Timeline（任务时间线）**，展示：
+
+```text
+Created（创建）
+Started（开始执行）
+Completed（完成）
+```
+
+#### 任务 9：Queue Metrics（队列指标）
+
+新增指标：
+
+| 指标 | 含义 |
+|---|---|
+| `queuedJobs` | 排队中的任务数 |
+| `runningJobs` | 执行中的任务数 |
+| `completedJobs` | 已完成任务数 |
+| `failedJobs` | 失败任务数 |
+| `avgDuration` | 平均执行耗时 |
+
+在 UI 中展示 **Queue Metrics（队列指标）**。
+
+#### 任务 10：模拟长任务
+
+新增 `embedding` 类型任务，模拟：
+
+```ts
+await sleep(5000)
+```
+
+观察状态流转：
+
+```text
+queued（排队中）
+↓
+running（执行中）
+↓
+success（成功）
+```
+
+---
+
+### 9.3 第 31 天验收标准
+
+1. 是否定义 Job（后台任务）
+2. 是否实现 JobStore（任务存储）
+3. 是否实现 QueueManager（队列管理器）
+4. 是否实现 Worker（工作进程）
+5. 是否支持 enqueue / dequeue（入队 / 出队）
+6. 是否支持 Job 状态更新
+7. 是否实现 Queue Dashboard（队列看板）
+8. 是否实现 Job Timeline（任务时间线）
+9. 是否增加 Queue Metrics（队列指标）
+10. 是否完成长任务模拟测试
+
+---
+
+### 9.4 第 31 天打卡模板
+
+【第31天打卡】
+
+1. 是否定义 Job（后台任务）：是 / 否
+2. 是否实现 JobStore（任务存储）：是 / 否
+3. 是否实现 QueueManager（队列管理器）：是 / 否
+4. 是否实现 Worker（工作进程）：是 / 否
+5. 是否支持 enqueue / dequeue（入队 / 出队）：是 / 否
+6. 是否支持 Job 状态更新：是 / 否
+7. 是否实现 Queue Dashboard（队列看板）：是 / 否
+8. 是否实现 Job Timeline（任务时间线）：是 / 否
+9. 是否增加 Queue Metrics（队列指标）：是 / 否
+10. 是否完成长任务模拟测试：是 / 否
+11. 遇到的最大问题：
+12. 当前系统能力：
+
+---
+
+### 9.5 第 31 天核心认知
+
+记住一句话：
+
+```text
+Workflow（工作流）解决“任务怎么执行”；
+Queue（队列）解决“任务什么时候执行”。
+```
+
+完成第 31 天后，你将正式进入：
+
+**Execution Infrastructure（执行基础设施）** 阶段
+
+这也是从：
+
+```text
+Agent Runtime（智能体运行时）
+```
+
+迈向：
+
+```text
+Agent Platform（智能体平台）
+```
+
+的第一步。
+
+---
+
+## 10. 一句话总结
 
 ```text
 day29 让 RAG 在文档变化时少重复计算 embedding；
@@ -648,4 +1064,11 @@ day30 让 RAG 的文档存储和向量存储分离，检索时先查 VectorStore
 ```text
 day30 的核心不是“马上变成高性能向量数据库”，
 而是为未来接入真正的 Vector DB（向量数据库）打好接口和架构基础。
+```
+
+面向第 31 天：
+
+```text
+day31 让 Workflow 从同步执行升级为异步 Job Queue：
+用户请求只创建 Job，Worker 在后台执行并更新状态，为长任务与 Agent Platform 铺路。
 ```
