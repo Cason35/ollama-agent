@@ -1,0 +1,513 @@
+{
+  "jobs": [
+    {
+      "id": "job_1780555606623_zmlhro",
+      "type": "reindex",
+      "payload": {
+        "scope": "knowledge-store-v7"
+      },
+      "status": "success",
+      "createdAt": 1780555606623,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780555606623,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780555611588,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780555614098,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780555611588,
+      "result": {
+        "message": "reindex 模拟完成，可在 RAG 面板继续执行真实 Reindex"
+      },
+      "completedAt": 1780555614098
+    },
+    {
+      "id": "job_1780555605658_o96zcv",
+      "type": "reindex",
+      "payload": {
+        "scope": "knowledge-store-v7"
+      },
+      "status": "success",
+      "createdAt": 1780555605658,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780555605658,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780555608561,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780555611067,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780555608560,
+      "result": {
+        "message": "reindex 模拟完成，可在 RAG 面板继续执行真实 Reindex"
+      },
+      "completedAt": 1780555611067
+    },
+    {
+      "id": "job_1780555604889_lzr7q7",
+      "type": "reindex",
+      "payload": {
+        "scope": "knowledge-store-v7"
+      },
+      "status": "success",
+      "createdAt": 1780555604889,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780555604889,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780555605511,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780555608022,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780555605511,
+      "result": {
+        "message": "reindex 模拟完成，可在 RAG 面板继续执行真实 Reindex"
+      },
+      "completedAt": 1780555608022
+    },
+    {
+      "id": "job_1780555286314_v1t9fl",
+      "type": "reindex",
+      "payload": {
+        "scope": "knowledge-store-v7"
+      },
+      "status": "success",
+      "createdAt": 1780555286314,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780555286314,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780555294905,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780555297422,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780555294905,
+      "result": {
+        "message": "reindex 模拟完成，可在 RAG 面板继续执行真实 Reindex"
+      },
+      "completedAt": 1780555297422
+    },
+    {
+      "id": "job_1780555285730_qea2ui",
+      "type": "retrieval",
+      "payload": {
+        "query": "Workflow Runtime"
+      },
+      "status": "success",
+      "createdAt": 1780555285730,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780555285730,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780555293084,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780555294598,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780555293084,
+      "result": {
+        "message": "retrieval 异步检索模拟完成",
+        "query": "Workflow Runtime"
+      },
+      "completedAt": 1780555294598
+    },
+    {
+      "id": "job_1780555285216_49a3vd",
+      "type": "workflow",
+      "payload": {
+        "goal": "异步执行一个 Workflow 示例任务"
+      },
+      "status": "success",
+      "createdAt": 1780555285216,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780555285216,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780555290653,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780555292655,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780555290653,
+      "result": {
+        "message": "workflow 异步执行模拟完成",
+        "goal": "异步执行一个 Workflow 示例任务"
+      },
+      "completedAt": 1780555292655
+    },
+    {
+      "id": "job_1780555284679_d9hq7y",
+      "type": "embedding",
+      "payload": {
+        "durationMs": 5000,
+        "document": "模拟 5000ms embedding 长任务"
+      },
+      "status": "success",
+      "createdAt": 1780555284679,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780555284679,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780555285186,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780555290202,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780555285186,
+      "result": {
+        "message": "embedding 长任务模拟完成",
+        "durationMs": 5000
+      },
+      "completedAt": 1780555290202
+    },
+    {
+      "id": "job_1780555274035_bylunk",
+      "type": "retrieval",
+      "payload": {
+        "query": "Workflow Runtime"
+      },
+      "status": "success",
+      "createdAt": 1780555274035,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780555274035,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780555274235,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780555275751,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780555274235,
+      "result": {
+        "message": "retrieval 异步检索模拟完成",
+        "query": "Workflow Runtime"
+      },
+      "completedAt": 1780555275751
+    },
+    {
+      "id": "job_1780555128473_1b4276",
+      "type": "workflow",
+      "payload": {
+        "goal": "异步执行一个 Workflow 示例任务"
+      },
+      "status": "success",
+      "createdAt": 1780555128473,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780555128473,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780555129082,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780555131096,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780555129082,
+      "result": {
+        "message": "workflow 异步执行模拟完成",
+        "goal": "异步执行一个 Workflow 示例任务"
+      },
+      "completedAt": 1780555131096
+    },
+    {
+      "id": "job_1780537283697_uczxzz",
+      "type": "retrieval",
+      "payload": {
+        "query": "Workflow Runtime"
+      },
+      "status": "success",
+      "createdAt": 1780537283697,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780537283697,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780537284138,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780537285654,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780537284138,
+      "result": {
+        "message": "retrieval 异步检索模拟完成",
+        "query": "Workflow Runtime"
+      },
+      "completedAt": 1780537285654
+    },
+    {
+      "id": "job_1780537129912_djfjzu",
+      "type": "workflow",
+      "payload": {
+        "goal": "异步执行一个 Workflow 示例任务"
+      },
+      "status": "success",
+      "createdAt": 1780537129912,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780537129912,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780537130404,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780537132419,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780537130404,
+      "result": {
+        "message": "workflow 异步执行模拟完成",
+        "goal": "异步执行一个 Workflow 示例任务"
+      },
+      "completedAt": 1780537132419
+    },
+    {
+      "id": "job_1780537062618_48au7z",
+      "type": "embedding",
+      "payload": {
+        "durationMs": 5000,
+        "document": "模拟 5000ms embedding 长任务"
+      },
+      "status": "success",
+      "createdAt": 1780537062618,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780537062618,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780537066038,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780537071056,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780537066038,
+      "result": {
+        "message": "embedding 长任务模拟完成",
+        "durationMs": 5000
+      },
+      "completedAt": 1780537071056
+    },
+    {
+      "id": "job_1780537061866_zn0q3e",
+      "type": "reindex",
+      "payload": {
+        "scope": "knowledge-store-v7"
+      },
+      "status": "success",
+      "createdAt": 1780537061866,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780537061866,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780537062988,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780537065506,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780537062988,
+      "result": {
+        "message": "reindex 模拟完成，可在 RAG 面板继续执行真实 Reindex"
+      },
+      "completedAt": 1780537065506
+    },
+    {
+      "id": "job_1780537059702_4636mc",
+      "type": "retrieval",
+      "payload": {
+        "query": "Workflow Runtime"
+      },
+      "status": "success",
+      "createdAt": 1780537059702,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780537059702,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780537061169,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780537062677,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780537061169,
+      "result": {
+        "message": "retrieval 异步检索模拟完成",
+        "query": "Workflow Runtime"
+      },
+      "completedAt": 1780537062677
+    },
+    {
+      "id": "job_1780537058306_ppesiv",
+      "type": "workflow",
+      "payload": {
+        "goal": "异步执行一个 Workflow 示例任务"
+      },
+      "status": "success",
+      "createdAt": 1780537058306,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780537058306,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780537058751,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780537060768,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780537058751,
+      "result": {
+        "message": "workflow 异步执行模拟完成",
+        "goal": "异步执行一个 Workflow 示例任务"
+      },
+      "completedAt": 1780537060768
+    },
+    {
+      "id": "job_1780537037569_iixhez",
+      "type": "workflow",
+      "payload": {
+        "goal": "异步执行一个 Workflow 示例任务"
+      },
+      "status": "success",
+      "createdAt": 1780537037569,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780537037569,
+          "note": "用户请求已创建 Job 并进入队列"
+        },
+        {
+          "label": "Started",
+          "at": 1780537038109,
+          "note": "Worker 已取出任务并开始执行"
+        },
+        {
+          "label": "Completed",
+          "at": 1780537040112,
+          "note": "任务执行成功并写入结果"
+        }
+      ],
+      "startedAt": 1780537038109,
+      "result": {
+        "message": "workflow 异步执行模拟完成",
+        "goal": "异步执行一个 Workflow 示例任务"
+      },
+      "completedAt": 1780537040112
+    }
+  ]
+}
