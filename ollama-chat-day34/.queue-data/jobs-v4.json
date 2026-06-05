@@ -1,0 +1,238 @@
+{
+  "jobs": [
+    {
+      "id": "job_1780641873218_o0f2dt",
+      "type": "embedding",
+      "payload": {
+        "durationMs": 5000,
+        "document": "Day34 并发测试任务 2"
+      },
+      "priority": 1,
+      "status": "queued",
+      "attempts": 0,
+      "maxAttempts": 3,
+      "createdAt": 1780641873218,
+      "updatedAt": 1780641873218,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780641873218,
+          "note": "用户请求已创建 Job，并进入 Queue Runtime V4 WorkerPool 队列"
+        }
+      ]
+    },
+    {
+      "id": "job_1780641858009_kuf3on",
+      "type": "embedding",
+      "payload": {
+        "durationMs": 5000,
+        "document": "Day34 并发测试任务 3"
+      },
+      "priority": 1,
+      "status": "success",
+      "attempts": 1,
+      "maxAttempts": 3,
+      "createdAt": 1780641858009,
+      "updatedAt": 1780641863691,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780641858009,
+          "note": "用户请求已创建 Job，并进入 Queue Runtime V4 WorkerPool 队列"
+        },
+        {
+          "label": "Claimed",
+          "at": 1780641858679,
+          "note": "Worker worker_3 已认领任务并写入 job lock"
+        },
+        {
+          "label": "Started",
+          "at": 1780641858679,
+          "note": "Worker worker_3 开始执行第 1 次尝试，当前优先级为 1"
+        },
+        {
+          "label": "Completed",
+          "at": 1780641863691,
+          "note": "Worker worker_3 完成第 1 次尝试并写入结果"
+        }
+      ],
+      "startedAt": 1780641858679,
+      "result": {
+        "message": "embedding 长任务模拟完成",
+        "durationMs": 5000
+      },
+      "completedAt": 1780641863691
+    },
+    {
+      "id": "job_1780641855023_qbcqsn",
+      "type": "reminder",
+      "payload": {
+        "text": "第34天 Reminder Job 已按 scheduledAt 自动触发"
+      },
+      "priority": 10,
+      "status": "success",
+      "attempts": 1,
+      "maxAttempts": 3,
+      "createdAt": 1780641854980,
+      "updatedAt": 1780641885902,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780641854980,
+          "note": "用户请求已创建 Job，并进入 Queue Runtime V4 WorkerPool 队列"
+        },
+        {
+          "label": "Scheduled",
+          "at": 1780641855023,
+          "note": "任务已调度到 2026/6/5 14:44:44 后执行"
+        },
+        {
+          "label": "Claimed",
+          "at": 1780641885388,
+          "note": "Worker worker_1 已认领任务并写入 job lock"
+        },
+        {
+          "label": "Started",
+          "at": 1780641885388,
+          "note": "Worker worker_1 开始执行第 1 次尝试，当前优先级为 10"
+        },
+        {
+          "label": "Completed",
+          "at": 1780641885902,
+          "note": "Worker worker_1 完成第 1 次尝试并写入结果"
+        }
+      ],
+      "startedAt": 1780641885388,
+      "result": {
+        "message": "reminder 定时提醒已触发",
+        "text": "第34天 Reminder Job 已按 scheduledAt 自动触发"
+      },
+      "completedAt": 1780641885902
+    },
+    {
+      "id": "job_1780641851086_qbods1",
+      "type": "embedding",
+      "payload": {
+        "durationMs": 5000,
+        "document": "模拟 5000ms embedding 长任务"
+      },
+      "priority": 1,
+      "status": "success",
+      "attempts": 1,
+      "maxAttempts": 3,
+      "createdAt": 1780641851085,
+      "updatedAt": 1780641856386,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780641851086,
+          "note": "用户请求已创建 Job，并进入 Queue Runtime V4 WorkerPool 队列"
+        },
+        {
+          "label": "Claimed",
+          "at": 1780641851368,
+          "note": "Worker worker_1 已认领任务并写入 job lock"
+        },
+        {
+          "label": "Started",
+          "at": 1780641851368,
+          "note": "Worker worker_1 开始执行第 1 次尝试，当前优先级为 1"
+        },
+        {
+          "label": "Completed",
+          "at": 1780641856386,
+          "note": "Worker worker_1 完成第 1 次尝试并写入结果"
+        }
+      ],
+      "startedAt": 1780641851368,
+      "result": {
+        "message": "embedding 长任务模拟完成",
+        "durationMs": 5000
+      },
+      "completedAt": 1780641856386
+    },
+    {
+      "id": "job_1780641848682_3vfv9a",
+      "type": "workflow",
+      "payload": {
+        "goal": "异步执行一个 Workflow 示例任务"
+      },
+      "priority": 10,
+      "status": "success",
+      "attempts": 1,
+      "maxAttempts": 3,
+      "createdAt": 1780641848682,
+      "updatedAt": 1780641850974,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780641848682,
+          "note": "用户请求已创建 Job，并进入 Queue Runtime V4 WorkerPool 队列"
+        },
+        {
+          "label": "Claimed",
+          "at": 1780641848964,
+          "note": "Worker worker_1 已认领任务并写入 job lock"
+        },
+        {
+          "label": "Started",
+          "at": 1780641848964,
+          "note": "Worker worker_1 开始执行第 1 次尝试，当前优先级为 10"
+        },
+        {
+          "label": "Completed",
+          "at": 1780641850974,
+          "note": "Worker worker_1 完成第 1 次尝试并写入结果"
+        }
+      ],
+      "startedAt": 1780641848964,
+      "result": {
+        "message": "workflow 异步执行模拟完成",
+        "goal": "异步执行一个 Workflow 示例任务"
+      },
+      "completedAt": 1780641850974
+    },
+    {
+      "id": "job_1780641811986_1dku5b",
+      "type": "embedding",
+      "payload": {
+        "durationMs": 5000,
+        "document": "Day34 并发测试任务 5"
+      },
+      "priority": 1,
+      "status": "queued",
+      "attempts": 0,
+      "maxAttempts": 3,
+      "createdAt": 1780641811986,
+      "updatedAt": 1780641811986,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780641811986,
+          "note": "用户请求已创建 Job，并进入 Queue Runtime V4 WorkerPool 队列"
+        }
+      ]
+    },
+    {
+      "id": "job_1780641811956_792q9c",
+      "type": "embedding",
+      "payload": {
+        "durationMs": 5000,
+        "document": "Day34 并发测试任务 1"
+      },
+      "priority": 1,
+      "status": "queued",
+      "attempts": 0,
+      "maxAttempts": 3,
+      "createdAt": 1780641811956,
+      "updatedAt": 1780641811956,
+      "timeline": [
+        {
+          "label": "Created",
+          "at": 1780641811956,
+          "note": "用户请求已创建 Job，并进入 Queue Runtime V4 WorkerPool 队列"
+        }
+      ]
+    }
+  ]
+}
