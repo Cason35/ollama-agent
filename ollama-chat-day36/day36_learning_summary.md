@@ -690,3 +690,519 @@ day36 让队列学会“任务该停的时候要安全地停”。
 ```
 
 完成第36天后，系统已经从 Queue Runtime V5（资源与速率控制）升级为 Queue Runtime V6（生命周期控制）。
+
+---
+
+## 8. 第 36 天总结
+
+你第 36 天完成的是：
+
+```text
+🔥 Queue Runtime V6（队列运行时 V6）：Lifecycle Control（生命周期控制）
+```
+
+这是 Queue（队列）系统非常重要的一层。
+
+因为从今天开始，你的任务系统已经拥有：
+
+**生命周期管理（Lifecycle Management，任务从创建到结束的全过程管控）**
+
+```text
+cancelJob（取消任务方法）
+cancelling（取消中）
+cancelled（已取消）
+timeout（已超时）
+timeout wrapper（超时包装器）
+cooperative cancellation（协作式取消）
+graceful shutdown（优雅关闭）
+```
+
+**健壮性（Robustness，系统在异常场景下仍能正确运行）**
+
+```text
+timeout → retry（超时后重试）
+timeout → dead_letter（超时后进入死信队列）
+worker 安全退出（Worker Safe Exit，工作进程关闭时不丢任务）
+running job 安全中断（Running Job Safe Interrupt，运行中任务可被安全取消）
+```
+
+很多开源项目其实做到：
+
+```text
+Queue（队列）
+↓
+Worker（工作进程）
+↓
+Retry（重试）
+```
+
+就结束了。
+
+而你已经开始做：
+
+```text
+Job Lifecycle Management（任务生命周期管理）
+```
+
+这其实已经开始接近：
+
+```text
+BullMQ（Node.js 任务队列库）
+Temporal（分布式工作流引擎）
+Prefect（数据/工作流编排平台）
+Airflow（数据流水线调度平台）
+```
+
+里面比较高级的部分。
+
+### 8.1 当前整体进度
+
+如果按照 Agent Engineer（智能体工程师）完整路线：
+
+```text
+Agent Foundation（智能体基础）           ██████████ 100%
+Workflow Runtime（工作流运行时）           ██████████ 100%
+Tool Ecosystem（工具生态）             █████████░  90%
+RAG Runtime（检索增强生成运行时）                ██████████ 100%
+Knowledge Infrastructure（知识基础设施）   █████████░  90%
+
+Queue Runtime（队列运行时）              █████████░  85%
+
+Multi-Agent（多智能体）                ░░░░░░░░░░   0%
+Production Infra（生产基础设施）           ░░░░░░░░░░   0%
+```
+
+你已经接近：
+
+```text
+🔥 Agent Platform Runtime（智能体平台运行时）完成阶段
+```
+
+---
+
+## 9. 第 37 天学习计划：Queue Runtime V7（队列运行时 V7）：Workflow as Job（工作流即任务）
+
+### 9.1 今日核心目标
+
+今天是一个非常大的升级。
+
+你要把：
+
+```text
+Workflow Runtime（工作流运行时）
+```
+
+和
+
+```text
+Queue Runtime（队列运行时）
+```
+
+正式整合。
+
+### 9.2 为什么必须做这一步？
+
+现在实际上：
+
+**Workflow（工作流）** 负责：
+
+```text
+步骤（Step）
+DAG（有向无环图，步骤依赖关系）
+条件分支（Conditional Branch）
+HITL（Human-in-the-Loop，人工介入）
+```
+
+**Queue（队列）** 负责：
+
+```text
+任务调度（Job Scheduling）
+Retry（重试）
+Priority（优先级）
+RateLimit（速率限制）
+Worker（工作进程）
+```
+
+但两者还是：
+
+```text
+两个系统
+```
+
+真实 Agent Platform（智能体平台）：
+
+```text
+Workflow（工作流）
+↓
+Job（后台任务）
+↓
+Queue（队列）
+↓
+Worker（工作进程）
+```
+
+### 9.3 目标架构
+
+从：
+
+```text
+User（用户）
+↓
+WorkflowRuntime.execute()（工作流运行时直接执行）
+```
+
+升级为：
+
+```text
+User（用户）
+↓
+Create Workflow Job（创建工作流任务）
+↓
+Queue（队列）
+↓
+Worker（工作进程）
+↓
+Workflow Runtime（工作流运行时）
+```
+
+### 9.4 第 37 天最终效果
+
+用户：
+
+```text
+帮我分析整个知识库
+```
+
+系统：
+
+```text
+Workflow Job Created（工作流任务已创建）
+
+job_001
+```
+
+Worker（工作进程）：
+
+```text
+执行 workflow（工作流）
+```
+
+Dashboard（看板）：
+
+```text
+Job（任务）
+↓
+Workflow（工作流）
+↓
+Step（步骤）
+
+全部可见。
+```
+
+### 9.5 任务清单
+
+#### 任务 1：新增 WorkflowJob（工作流任务）
+
+新增：
+
+```ts
+type WorkflowJobPayload = {
+  workflowId: string  // 工作流 ID
+}
+```
+
+Job（任务）：
+
+```ts
+{
+  type: "workflow"  // 任务类型：工作流
+}
+```
+
+#### 任务 2：Workflow Runtime（工作流运行时）不直接执行
+
+之前：
+
+```ts
+workflowRuntime.execute(
+  workflow
+)
+```
+
+升级：
+
+```ts
+createWorkflowJob(
+  workflow.id
+)
+```
+
+然后：
+
+```text
+交给 Queue（队列）
+```
+
+#### 任务 3：Worker（工作进程）支持 workflow job（工作流任务）
+
+新增：
+
+```ts
+case "workflow":
+```
+
+内部：
+
+```ts
+workflowRuntime.execute(
+  workflowId
+)
+```
+
+#### 任务 4：Workflow Status（工作流状态）同步
+
+新增：
+
+```ts
+workflow.status  // 工作流状态
+```
+
+状态：
+
+```text
+queued（排队中）
+running（运行中）
+paused（已暂停）
+success（成功）
+failed（失败）
+cancelled（已取消）
+```
+
+同步：
+
+```text
+Job Status（任务状态）
+↔
+Workflow Status（工作流状态）
+```
+
+#### 任务 5：Job 与 Workflow（工作流）关联
+
+新增：
+
+```ts
+type Job = {
+  workflowId?: string  // 可选：关联的工作流 ID
+}
+```
+
+这样：
+
+```text
+Job（任务）
+↓
+Workflow（工作流）
+
+可以互相跳转。
+```
+
+#### 任务 6：Workflow Dashboard（工作流看板）升级
+
+展示：
+
+```text
+Workflow（工作流）
+关联 Job（任务）
+关联 Worker（工作进程）
+关联 Timeline（时间线）
+```
+
+例如：
+
+```text
+Workflow（工作流）
+  ↓
+
+Job #123（任务 #123）
+
+Worker #2（工作进程 #2）
+
+Status（状态）:
+running（运行中）
+```
+
+#### 任务 7：Workflow Timeline（工作流时间线）与 Job Timeline（任务时间线）合并
+
+之前：
+
+```text
+Workflow Timeline（工作流时间线）
+```
+
+和
+
+```text
+Job Timeline（任务时间线）
+```
+
+分开。
+
+升级：
+
+```text
+Unified Timeline（统一时间线）
+```
+
+例如：
+
+```text
+10:00 Job Created（任务已创建）
+
+10:01 Worker Claimed（工作进程已认领）
+
+10:02 Workflow Started（工作流已开始）
+
+10:03 Step1 Success（步骤 1 成功）
+
+10:04 Step2 Success（步骤 2 成功）
+
+10:05 Workflow Success（工作流成功）
+
+10:05 Job Success（任务成功）
+```
+
+#### 任务 8：Workflow Cancellation（工作流取消）
+
+用户：
+
+```text
+取消 Workflow（工作流）
+```
+
+系统：
+
+```text
+取消关联 Job（任务）
+```
+
+最终：
+
+```text
+Workflow（工作流）
+↓
+cancelled（已取消）
+```
+
+#### 任务 9：Workflow Retry（工作流重试）
+
+如果：
+
+```text
+Workflow Job Failed（工作流任务失败）
+```
+
+不要：
+
+```text
+重新建 Workflow（工作流）
+```
+
+而是：
+
+```text
+重新创建 Job（任务）
+```
+
+这样：
+
+```text
+Workflow（工作流）不变
+```
+
+#### 任务 10：完整链路测试（End-to-End Test，端到端测试）
+
+测试：
+
+```text
+创建 Workflow（工作流）
+↓
+生成 Job（任务）
+↓
+进入 Queue（队列）
+↓
+Worker 执行（工作进程执行）
+↓
+Workflow Success（工作流成功）
+↓
+Job Success（任务成功）
+```
+
+再测试：
+
+```text
+Workflow Cancel（工作流取消）
+```
+
+再测试：
+
+```text
+Workflow Retry（工作流重试）
+```
+
+### 9.6 第 37 天验收标准
+
+1. 是否新增 WorkflowJob（工作流任务）
+2. Workflow（工作流）是否改为 Job 驱动（由任务驱动执行，而非直接调用运行时）
+3. Worker（工作进程）是否支持 workflow job（工作流任务）
+4. 是否同步 Workflow Status（工作流状态）
+5. Job（任务）是否关联 Workflow（工作流）
+6. Dashboard（看板）是否展示 Job ↔ Workflow（任务与工作流双向关联）
+7. 是否实现 Unified Timeline（统一时间线）
+8. 是否支持 Workflow Cancel（工作流取消）
+9. 是否支持 Workflow Retry（工作流重试）
+10. 是否完成完整链路测试（End-to-End Test）
+
+### 9.7 第 37 天打卡模板
+
+【第37天打卡】
+
+1. 是否新增 WorkflowJob（工作流任务）：是 / 否
+2. Workflow（工作流）是否改为 Job 驱动：是 / 否
+
+3. Worker（工作进程）是否支持 workflow job（工作流任务）：是 / 否
+4. 是否同步 Workflow Status（工作流状态）：是 / 否
+
+5. Job（任务）是否关联 Workflow（工作流）：是 / 否
+6. Dashboard（看板）是否展示 Job ↔ Workflow（任务与工作流双向关联）：是 / 否
+
+7. 是否实现 Unified Timeline（统一时间线）：是 / 否
+8. 是否支持 Workflow Cancel（工作流取消）：是 / 否
+
+9. 是否支持 Workflow Retry（工作流重试）：是 / 否
+10. 是否完成完整链路测试（End-to-End Test）：是 / 否
+
+11. 遇到的最大问题：
+
+12. 当前系统能力：
+
+### 9.8 第 37 天核心认知
+
+记住一句话：
+
+```text
+Workflow（工作流）描述任务逻辑，Queue（队列）决定任务执行。
+```
+
+完成第 37 天之后，你会完成一个巨大的升级：
+
+```text
+Workflow Runtime（工作流运行时）
++
+Queue Runtime（队列运行时）
+
+融合成：
+
+🔥 Agent Execution Platform V1（智能体执行平台 V1）
+```
+
+这是从「Agent Runtime（智能体运行时）」迈向「Agent Platform（智能体平台）」的真正分界线。
