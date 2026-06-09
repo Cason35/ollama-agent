@@ -682,3 +682,569 @@ Critic Review（审查智能体评审）
 Planner -> Researcher -> Writer（规划到研究再到写作）
 Multi-Agent Workflow（多智能体工作流）
 ```
+
+---
+
+## 11. 第38天里程碑总结
+
+第38天完成的是：
+
+```text
+Multi-Agent Runtime V1（多智能体运行时第 1 版）：Agent Registry（智能体注册表）
+```
+
+这是整个学习路线里的一个重要转折点。
+
+因为从 Day 1 到 Day 37，系统主要构建的是：
+
+```text
+Tool Runtime（工具运行时）
+Workflow Runtime（工作流运行时）
+Queue Runtime（队列运行时）
+RAG Runtime（Retrieval-Augmented Generation Runtime，检索增强生成运行时）
+```
+
+这些能力本质上还是围绕：
+
+```text
+一个 Agent（智能体）
+调用很多 Tool（工具）
+```
+
+而 Day 38 开始进入：
+
+```text
+多个 Agent（智能体）
+协同完成任务
+```
+
+的世界。
+
+当前系统已经拥有：
+
+```text
+Agent Layer（智能体层）
+Agent Registry（智能体注册表）
+Capability Routing（能力路由）
+Agent Explorer（智能体浏览器）
+Agent Executor（智能体执行器）
+Agent Types（智能体类型）
+Research Agent（研究智能体）
+Planner Agent（规划智能体）
+Critic Agent（审查智能体）
+Writer Agent（写作智能体）
+Agent Discovery（智能体发现）
+Capability Search（能力搜索）
+Agent Metadata（智能体元数据）
+Agent Context（智能体上下文）
+```
+
+这意味着系统已经完成了：
+
+```text
+Tool（工具） -> Agent（智能体）
+```
+
+这一层抽象。
+
+以前系统更关注“有哪些工具可以调用”；现在系统开始关注“有哪些角色可以承担任务，以及这些角色如何组织工具”。
+
+---
+
+## 12. 当前进度
+
+如果按照完整 Agent Engineer（智能体工程师）路线来看，当前进度可以理解为：
+
+```text
+Agent Foundation（智能体基础）            ██████████ 100%
+Workflow Runtime（工作流运行时）          ██████████ 100%
+Queue Runtime（队列运行时）               ██████████ 100%
+RAG Runtime（检索增强生成运行时）          ██████████ 100%
+
+Agent Platform（智能体平台）              █████████░  90%
+
+Multi-Agent Runtime（多智能体运行时）      ███░░░░░░░  30%
+
+Production Infra（生产基础设施）          ░░░░░░░░░░   0%
+```
+
+整体进度大约来到：
+
+```text
+80% 左右
+```
+
+这里的 80% 不是说已经具备生产系统能力，而是说本地 Agent（智能体）工程学习路线中的基础模块已经大部分完成：
+
+```text
+Tool（工具）
+Workflow（工作流）
+Queue（队列）
+RAG（检索增强生成）
+Knowledge Store（知识库存储）
+Agent Registry（智能体注册表）
+```
+
+接下来真正要补的是：
+
+```text
+Agent-to-Agent Collaboration（智能体到智能体协作）
+Production Infra（生产基础设施）
+Observability（可观测性）
+Permission / Security（权限与安全）
+Deployment（部署）
+```
+
+---
+
+## 13. 第39天学习计划：Multi-Agent Runtime V2（多智能体运行时第 2 版）
+
+第39天的主题是：
+
+```text
+Multi-Agent Runtime V2（多智能体运行时第 2 版）：Agent-to-Agent Collaboration（智能体到智能体协作）
+```
+
+### 13.1 今日核心目标
+
+第39天要让 Agent（智能体）不只是独立执行任务，而是开始支持：
+
+```text
+Agent（智能体）
+  -> 调用另一个 Agent（智能体）
+```
+
+也就是：
+
+```text
+Agent-to-Agent Collaboration（智能体到智能体协作）
+```
+
+day38 的 `executeAgent("research", task)` 只能让：
+
+```text
+Research Agent（研究智能体）
+自己完成任务
+```
+
+而真实系统中，更常见的是：
+
+```text
+Research Agent（研究智能体）
+  -> Planner Agent（规划智能体）
+  -> Critic Agent（审查智能体）
+  -> Writer Agent（写作智能体）
+```
+
+多个 Agent（智能体）共同完成一个复杂任务。
+
+### 13.2 为什么必须学 Agent-to-Agent Collaboration（智能体到智能体协作）
+
+因为复杂任务通常不是一次工具调用可以解决的。
+
+例如用户输入：
+
+```text
+帮我学习 LangGraph。
+```
+
+理想流程不是让一个 Agent（智能体）直接从头写到尾，而是：
+
+```text
+Research Agent（研究智能体）
+  -> 收集资料
+
+Planner Agent（规划智能体）
+  -> 制定学习路线
+
+Critic Agent（审查智能体）
+  -> 检查漏洞、缺失和不合理处
+
+Writer Agent（写作智能体）
+  -> 输出最终内容
+```
+
+这样系统就从“一个角色做所有事”升级为“多个角色分工协作”。
+
+### 13.3 最终效果
+
+用户输入：
+
+```text
+帮我学习 LangGraph。
+```
+
+系统执行：
+
+```text
+Research Agent（研究智能体）
+  -> 收集资料
+  -> 交给 Planner Agent（规划智能体）
+
+Planner Agent（规划智能体）
+  -> 制定学习路线
+  -> 交给 Critic Agent（审查智能体）
+
+Critic Agent（审查智能体）
+  -> 检查漏洞
+  -> 交给 Writer Agent（写作智能体）
+
+Writer Agent（写作智能体）
+  -> 输出最终内容
+```
+
+第39天先不要让模型自动决定协作流程，而是先写死固定链路，确保 Runtime（运行时）、Timeline（时间线）、Call Graph（调用图）和 Metrics（指标）先跑通。
+
+---
+
+## 14. 第39天任务拆解
+
+### 14.1 任务 1：扩展 AgentTask（智能体任务）
+
+将 AgentTask（智能体任务）升级为：
+
+```ts
+type AgentTask = {
+  id: string;
+  goal: string;
+  context?: unknown;
+  parentTaskId?: string;
+  assignedAgentId?: string;
+};
+```
+
+字段含义：
+
+```text
+id：任务唯一标识。
+goal：任务目标。
+context：任务上下文。
+parentTaskId：父任务 ID，用于表示子任务来自哪个上游任务。
+assignedAgentId：被分配执行该任务的 Agent（智能体）ID。
+```
+
+作用是让一个 Agent（智能体）以后可以创建 Child Task（子任务），再交给另一个 Agent（智能体）。
+
+### 14.2 任务 2：扩展 AgentResult（智能体结果）
+
+将 AgentResult（智能体结果）升级为：
+
+```ts
+type AgentResult = {
+  taskId: string;
+  agentId: string;
+  output: string;
+  metadata?: Record<string, unknown>;
+  childResults?: AgentResult[];
+};
+```
+
+字段含义：
+
+```text
+taskId：结果对应的任务 ID。
+agentId：执行该任务的 Agent（智能体）ID。
+output：任务输出。
+metadata：额外元数据。
+childResults：下游 Agent（智能体）返回的嵌套结果。
+```
+
+这样可以支持：
+
+```text
+Agent Result（智能体结果）
+  -> 嵌套 Child Agent Result（子智能体结果）
+```
+
+### 14.3 任务 3：实现 AgentRuntime（智能体运行时）
+
+新增：
+
+```ts
+class AgentRuntime
+```
+
+AgentRuntime（智能体运行时）负责：
+
+```text
+executeAgent（执行智能体）
+delegateTask（委派任务）
+aggregateResults（聚合结果）
+```
+
+以后所有 Agent（智能体）都应该经过 AgentRuntime（智能体运行时）执行，而不是散落在各个函数里直接调用。
+
+### 14.4 任务 4：实现 delegateTask（委派任务）
+
+新增：
+
+```ts
+delegateTask(targetAgentId, task)
+```
+
+含义是：
+
+```text
+当前 Agent（智能体）
+  -> 将任务委派给目标 Agent（智能体）
+```
+
+例如：
+
+```text
+Research Agent（研究智能体）
+  -> delegate（委派）
+  -> Writer Agent（写作智能体）
+```
+
+delegateTask（委派任务）是 Agent-to-Agent Collaboration（智能体到智能体协作）的核心动作。
+
+### 14.5 任务 5：Agent Call Graph（智能体调用图）
+
+新增：
+
+```ts
+type AgentCallEdge = {
+  fromAgentId: string;
+  toAgentId: string;
+  taskId: string;
+};
+```
+
+Agent Call Graph（智能体调用图）用于记录：
+
+```text
+谁调用了谁；
+为了哪个 task（任务）调用；
+调用链路是什么。
+```
+
+例如：
+
+```text
+Research Agent（研究智能体）
+  -> Planner Agent（规划智能体）
+  -> Critic Agent（审查智能体）
+  -> Writer Agent（写作智能体）
+```
+
+### 14.6 任务 6：Agent Timeline（智能体时间线）
+
+新增 Agent Timeline（智能体时间线），记录协作过程：
+
+```text
+Research Started（研究智能体开始）
+Delegated To Planner（委派给规划智能体）
+Planner Finished（规划智能体完成）
+Delegated To Critic（委派给审查智能体）
+Critic Finished（审查智能体完成）
+Delegated To Writer（委派给写作智能体）
+Writer Finished（写作智能体完成）
+Research Finished（研究智能体完成）
+```
+
+它的作用类似 day37 的 Unified Timeline（统一时间线），但观察对象从 Job / Workflow（任务 / 工作流）扩展到了 Agent Collaboration（智能体协作）。
+
+### 14.7 任务 7：实现简单 Collaboration Workflow（协作工作流）
+
+第39天先实现固定流程：
+
+```text
+Research（研究）
+  -> Planner（规划）
+  -> Critic（审查）
+  -> Writer（写作）
+```
+
+暂时不要让模型决定流程。
+
+原因是：
+
+```text
+先把 AgentRuntime（智能体运行时）
+delegateTask（委派任务）
+Agent Call Graph（智能体调用图）
+Agent Timeline（智能体时间线）
+Agent Metrics（智能体指标）
+```
+
+这些基础设施跑通，再考虑让模型动态规划协作链。
+
+### 14.8 任务 8：Agent Dashboard（智能体看板）升级
+
+升级 Agent Dashboard（智能体看板）或 Agent Explorer（智能体浏览器），展示：
+
+```text
+Agent（智能体）
+Tasks（任务）
+Delegations（委派）
+Success Rate（成功率）
+Agent Call Graph（智能体调用图）
+```
+
+例如：
+
+```text
+Research Agent（研究智能体）
+  ↓
+Planner Agent（规划智能体）
+  ↓
+Critic Agent（审查智能体）
+  ↓
+Writer Agent（写作智能体）
+```
+
+### 14.9 任务 9：Agent Metrics（智能体指标）升级
+
+新增更完整的 AgentMetrics（智能体指标）：
+
+```ts
+type AgentMetrics = {
+  executedTasks: number;
+  delegatedTasks: number;
+  avgTaskDuration: number;
+  successRate: number;
+};
+```
+
+字段含义：
+
+```text
+executedTasks：已执行任务数。
+delegatedTasks：已委派任务数。
+avgTaskDuration：平均任务耗时。
+successRate：任务成功率。
+```
+
+### 14.10 任务 10：完整协作测试
+
+测试输入：
+
+```text
+学习 LangGraph。
+```
+
+验证固定链路全部执行：
+
+```text
+Research Agent（研究智能体）
+  -> Planner Agent（规划智能体）
+  -> Critic Agent（审查智能体）
+  -> Writer Agent（写作智能体）
+```
+
+验收时需要确认：
+
+```text
+每个 Agent（智能体）都执行过；
+每次 delegateTask（委派任务）都有记录；
+Agent Call Graph（智能体调用图）能展示调用关系；
+Agent Timeline（智能体时间线）能展示执行顺序；
+最终 Writer Agent（写作智能体）能输出汇总结果。
+```
+
+---
+
+## 15. 第39天验收标准
+
+1. 是否扩展 AgentTask（智能体任务）。
+2. 是否扩展 AgentResult（智能体结果）。
+3. 是否实现 AgentRuntime（智能体运行时）。
+4. 是否实现 delegateTask（委派任务）。
+5. 是否记录 Agent Call Graph（智能体调用图）。
+6. 是否实现 Agent Timeline（智能体时间线）。
+7. 是否实现固定协作链。
+8. Dashboard（看板）是否展示 Agent Call Graph（智能体调用图）。
+9. 是否增加 Agent Metrics（智能体指标）。
+10. 是否完成多 Agent（多智能体）协作测试。
+
+---
+
+## 16. 第39天打卡模板
+
+【第39天打卡】
+
+1. 是否扩展 AgentTask（智能体任务）：是 / 否
+
+2. 是否扩展 AgentResult（智能体结果）：是 / 否
+
+3. 是否实现 AgentRuntime（智能体运行时）：是 / 否
+
+4. 是否实现 delegateTask（委派任务）：是 / 否
+
+5. 是否记录 Agent Call Graph（智能体调用图）：是 / 否
+
+6. 是否实现 Agent Timeline（智能体时间线）：是 / 否
+
+7. 是否实现固定协作链：是 / 否
+
+8. Dashboard（看板）是否展示 Agent Call Graph（智能体调用图）：是 / 否
+
+9. 是否增加 Agent Metrics（智能体指标）：是 / 否
+
+10. 是否完成多 Agent（多智能体）协作测试：是 / 否
+
+11. 遇到的最大问题：
+
+```text
+待填写。
+```
+
+12. 当前系统能力：
+
+```text
+待填写。
+```
+
+---
+
+## 17. 第39天核心认知
+
+记住一句话：
+
+```text
+Tool（工具）是能力调用，Agent（智能体）是任务委派。
+```
+
+以前的系统链路是：
+
+```text
+User（用户）
+  -> Agent（智能体）
+  -> Tool（工具）
+```
+
+第39天要进入的新链路是：
+
+```text
+User（用户）
+  -> Research Agent（研究智能体）
+  -> Planner Agent（规划智能体）
+  -> Critic Agent（审查智能体）
+  -> Writer Agent（写作智能体）
+  -> Tool（工具）
+```
+
+完成第39天后，系统将进入真正的：
+
+```text
+Multi-Agent Collaboration Runtime（多智能体协作运行时）
+```
+
+阶段。
+
+这也是后续实现这些架构的基础：
+
+```text
+AutoGPT（自动任务型智能体框架）
+CrewAI（多智能体协作框架）
+LangGraph Supervisor（LangGraph 监督者 / 调度者架构）
+OpenAI Deep Research 风格架构（深度研究型多步骤智能体架构）
+```
+
+它们的共同核心都是：
+
+```text
+不再只让一个 Agent（智能体）调用 Tool（工具），
+而是让多个 Agent（智能体）通过明确的任务委派、上下文传递、结果聚合和质量审查共同完成复杂目标。
+```
