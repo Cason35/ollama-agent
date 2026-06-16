@@ -1,6 +1,6 @@
 ﻿"use client"; // 侧栏包含输入框、按钮和动态列表，需要客户端渲染
 
-import type { Dispatch, SetStateAction } from "react"; // 引入 React 状态 setter 类型
+import { useState, type Dispatch, type SetStateAction } from "react"; // 引入 React 状态 setter 类型
 import type { KnowledgeDocumentSummary, KnowledgeMetricsSnapshot, QueryRewriteDebug, RetrievalMode, RetrievedChunkHit, VectorRecordSummary } from "@/lib/knowledge/knowledge-types"; // 引入 RAG 与 VectorStore 类型
 import type { ToolDescriptor, ToolMetricsSnapshot } from "@/lib/tools/tool-registry"; // 引入工具描述与指标类型
 import type { WorkflowStorageMode } from "@/lib/workflow/workflow-store"; // 引入工作流存储模式类型
@@ -108,8 +108,39 @@ export function KnowledgeSidebar({
   handleCancelQueueJob,
   handleGracefulShutdown,
 }: KnowledgeSidebarProps) {
+  const [activePanel, setActivePanel] = useState<"runtime" | "knowledge" | "records">("runtime");
+  const tabClass = (panel: typeof activePanel) =>
+    `rounded-lg px-3 py-2 text-xs font-semibold transition ${
+      activePanel === panel
+        ? "bg-zinc-950 text-white shadow-sm dark:bg-zinc-50 dark:text-zinc-950"
+        : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/80 dark:text-zinc-300 dark:hover:bg-zinc-700"
+    }`;
+
   return (
-    <aside className="flex min-h-0 w-full shrink-0 flex-col overflow-y-auto overflow-x-hidden rounded-xl border border-zinc-200/80 bg-white/78 shadow-lg shadow-zinc-900/5 ring-1 ring-white/50 backdrop-blur-md dark:border-zinc-800/90 dark:bg-zinc-900/65 dark:shadow-black/30 dark:ring-zinc-700/40 lg:h-full lg:w-[320px] xl:w-[340px]">
+    <aside className="flex min-h-0 w-full shrink-0 flex-col overflow-y-auto overflow-x-hidden rounded-xl border border-zinc-200/80 bg-white/78 shadow-lg shadow-zinc-900/5 ring-1 ring-white/50 backdrop-blur-md dark:border-zinc-800/90 dark:bg-zinc-900/65 dark:shadow-black/30 dark:ring-zinc-700/40 lg:h-full lg:w-[380px] xl:w-[420px]">
+      <div className="sticky top-0 z-10 shrink-0 border-b border-zinc-200/80 bg-white/95 px-4 py-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">控制台</h2>
+            <p className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">按主题查看，避免所有调试工具挤在一起。</p>
+          </div>
+          <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-[10px] font-semibold text-emerald-800 ring-1 ring-emerald-500/20 dark:text-emerald-200">
+            Day 41
+          </span>
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-2" role="tablist" aria-label="侧边栏面板">
+          <button type="button" className={tabClass("runtime")} onClick={() => setActivePanel("runtime")}>
+            运行
+          </button>
+          <button type="button" className={tabClass("knowledge")} onClick={() => setActivePanel("knowledge")}>
+            知识
+          </button>
+          <button type="button" className={tabClass("records")} onClick={() => setActivePanel("records")}>
+            记录
+          </button>
+        </div>
+      </div>
+      <div className={activePanel === "runtime" ? "contents" : "hidden"}>
       <QueueDashboard
         jobs={queueJobs}
         metrics={queueMetrics}
@@ -123,10 +154,11 @@ export function KnowledgeSidebar({
         handleGracefulShutdown={handleGracefulShutdown}
       />
       <AgentExplorer />
-      <div className="shrink-0 border-b border-emerald-200/70 px-4 py-3 dark:border-emerald-900/40">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Tool Explorer</h2>
+      </div>
+      <div className={activePanel === "records" ? "shrink-0 border-b border-emerald-200/70 px-4 py-3 dark:border-emerald-900/40" : "hidden"}>
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Tool Explorer（工具浏览器）</h2>
         <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-          第41天：继承 retrieval / ragAnswer / reindexKnowledge，并在 Agent DAG Runtime 旁继续观察 Workflow as Job、统一时间线、重启与生命周期控制。
+          第41天：继承 retrieval（检索）/ ragAnswer（基于知识回答）/ reindexKnowledge（重建索引），并观察 Workflow as Job（工作流任务化）、统一时间线、重启与生命周期控制。
         </p>
         <ul className="mt-3 max-h-48 space-y-2 overflow-y-auto overflow-x-hidden pr-1">
           {registeredTools.length === 0 ? (
@@ -167,17 +199,17 @@ export function KnowledgeSidebar({
                   ) : null}
                   {m ? (
                     <p className="mt-1 break-all font-mono text-[10px] text-amber-800/90 dark:text-amber-200/90">
-                      calls: {m.totalCalls}, ok: {m.successCalls}, fail: {m.failedCalls}, avg: {m.avgDurationMs}ms
+                      calls(调用): {m.totalCalls}, ok(成功): {m.successCalls}, fail(失败): {m.failedCalls}, avg(平均): {m.avgDurationMs}ms
                     </p>
                   ) : null}
                   {tool.inputSchema ? (
                     <p className="mt-1 break-all font-mono text-[10px] text-emerald-700/80 dark:text-emerald-300/80">
-                      in: {JSON.stringify(tool.inputSchema)}
+                      in(输入): {JSON.stringify(tool.inputSchema)}
                     </p>
                   ) : null}
                   {tool.outputSchema ? (
                     <p className="break-all font-mono text-[10px] text-emerald-700/80 dark:text-emerald-300/80">
-                      out: {JSON.stringify(tool.outputSchema)}
+                      out(输出): {JSON.stringify(tool.outputSchema)}
                     </p>
                   ) : null}
                 </li>
@@ -187,34 +219,34 @@ export function KnowledgeSidebar({
         </ul>
       </div>
 
-      <div className="shrink-0 border-b border-sky-200/70 px-4 py-3 dark:border-sky-900/40">
+      <div className={activePanel === "knowledge" ? "shrink-0 border-b border-sky-200/70 px-4 py-3 dark:border-sky-900/40" : "hidden"}>
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">RAG 知识库</h2>
         <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-          第35天：继承 RAG V7 · Knowledge Store · Local Vector Store · Metadata Filter · Vector Explorer。
+          第35天：继承 RAG（检索增强生成）V7 · Knowledge Store（知识存储） · Local Vector Store（本地向量库） · Metadata Filter（元数据过滤） · Vector Explorer（向量浏览器）。
         </p>
         {knowledgeMetrics ? (
           <div className="mt-2 space-y-1 font-mono text-[10px] text-sky-800/90 dark:text-sky-200/90">
             <p>
-              docs: {knowledgeMetrics.index?.documentsCount ?? knowledgeMetrics.documents}, chunks:{" "}
-              {knowledgeMetrics.index?.chunksCount ?? knowledgeMetrics.chunks}, avg/doc:{" "}
-              {knowledgeMetrics.index?.avgChunksPerDoc ?? 0}, avg size: {knowledgeMetrics.avgChunkSize}
+              docs(文档): {knowledgeMetrics.index?.documentsCount ?? knowledgeMetrics.documents}, chunks(分块):{" "}
+              {knowledgeMetrics.index?.chunksCount ?? knowledgeMetrics.chunks}, avg/doc(每篇均值):{" "}
+              {knowledgeMetrics.index?.avgChunksPerDoc ?? 0}, avg size(平均大小): {knowledgeMetrics.avgChunkSize}
             </p>
             <p>
-              cache hit: {Math.round((knowledgeMetrics.index?.cacheHitRate ?? 0) * 100)}%, cached:{" "}
-              {knowledgeMetrics.index?.cachedEmbeddings ?? 0}, generated:{" "}
+              cache hit(缓存命中): {Math.round((knowledgeMetrics.index?.cacheHitRate ?? 0) * 100)}%, cached(已缓存):{" "}
+              {knowledgeMetrics.index?.cachedEmbeddings ?? 0}, generated(新生成):{" "}
               {knowledgeMetrics.index?.generatedEmbeddings ?? 0}
             </p>
             <p>
-              vectors: {knowledgeMetrics.vector?.vectorCount ?? 0}, dim:{" "}
-              {knowledgeMetrics.vector?.avgEmbeddingDimension ?? 0}, vector queries:{" "}
-              {knowledgeMetrics.vector?.queryCount ?? 0}, avg query:{" "}
+              vectors(向量): {knowledgeMetrics.vector?.vectorCount ?? 0}, dim(维度):{" "}
+              {knowledgeMetrics.vector?.avgEmbeddingDimension ?? 0}, vector queries(向量查询):{" "}
+              {knowledgeMetrics.vector?.queryCount ?? 0}, avg query(平均查询):{" "}
               {knowledgeMetrics.vector?.avgQueryDuration ?? 0}ms
             </p>
             <p>
-              queries: {knowledgeMetrics.retrieval?.queryCount ?? knowledgeMetrics.retrievalCount}, avgTop:{" "}
-              {knowledgeMetrics.retrieval?.avgTopScore ?? 0}, noHit: {knowledgeMetrics.retrieval?.noResultCount ?? 0},
-              rewrite: {knowledgeMetrics.queryRewrite?.rewriteCount ?? 0}, avgQ:{" "}
-              {knowledgeMetrics.queryRewrite?.avgGeneratedQueries ?? 0}, fallback:{" "}
+              queries(查询): {knowledgeMetrics.retrieval?.queryCount ?? knowledgeMetrics.retrievalCount}, avgTop(最高分均值):{" "}
+              {knowledgeMetrics.retrieval?.avgTopScore ?? 0}, noHit(无命中): {knowledgeMetrics.retrieval?.noResultCount ?? 0},
+              rewrite(改写): {knowledgeMetrics.queryRewrite?.rewriteCount ?? 0}, avgQ(平均改写数):{" "}
+              {knowledgeMetrics.queryRewrite?.avgGeneratedQueries ?? 0}, fallback(兜底):{" "}
               {knowledgeMetrics.queryRewrite?.fallbackTriggeredCount ?? 0}
             </p>
           </div>
@@ -223,13 +255,13 @@ export function KnowledgeSidebar({
         )}
         {knowledgeMetrics?.index?.lastIndexStats ? (
           <p className="mt-2 rounded-lg border border-sky-200/70 bg-sky-50/70 px-2 py-1.5 font-mono text-[10px] text-sky-900 dark:border-sky-800/40 dark:bg-sky-950/20 dark:text-sky-100">
-            last index: v{knowledgeMetrics.index.lastIndexStats.version}, total:{" "}
-            {knowledgeMetrics.index.lastIndexStats.totalChunks}, added:{" "}
-            {knowledgeMetrics.index.lastIndexStats.addedChunks}, updated:{" "}
-            {knowledgeMetrics.index.lastIndexStats.updatedChunks}, reused:{" "}
-            {knowledgeMetrics.index.lastIndexStats.reusedChunks}, generated:{" "}
-            {knowledgeMetrics.index.lastIndexStats.generatedEmbeddings}, vectors:{" "}
-            {knowledgeMetrics.index.lastIndexStats.upsertedVectors}, hit:{" "}
+            last index(最近索引): v{knowledgeMetrics.index.lastIndexStats.version}, total(总分块):{" "}
+            {knowledgeMetrics.index.lastIndexStats.totalChunks}, added(新增):{" "}
+            {knowledgeMetrics.index.lastIndexStats.addedChunks}, updated(更新):{" "}
+            {knowledgeMetrics.index.lastIndexStats.updatedChunks}, reused(复用):{" "}
+            {knowledgeMetrics.index.lastIndexStats.reusedChunks}, generated(生成):{" "}
+            {knowledgeMetrics.index.lastIndexStats.generatedEmbeddings}, vectors(向量):{" "}
+            {knowledgeMetrics.index.lastIndexStats.upsertedVectors}, hit(命中):{" "}
             {Math.round(knowledgeMetrics.index.lastIndexStats.cacheHitRate * 100)}%
           </p>
         ) : null}
@@ -243,7 +275,7 @@ export function KnowledgeSidebar({
         <textarea
           value={knowledgeImportText}
           onChange={(e) => setKnowledgeImportText(e.target.value)}
-          placeholder="粘贴笔记正文，点击 Import 导入知识库…"
+          placeholder="粘贴笔记正文，点击 Import（导入）写入知识库…"
           rows={4}
           className="mt-2 w-full resize-y rounded-lg border border-sky-200/80 bg-white/80 px-2 py-1.5 text-xs leading-relaxed dark:border-sky-800/50 dark:bg-zinc-950/40"
         />
@@ -253,7 +285,7 @@ export function KnowledgeSidebar({
           onClick={() => void handleImportKnowledge()}
           className="mt-2 w-full rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
         >
-          {knowledgeLoading ? "处理中…" : "Import 写入 VectorStore"}
+          {knowledgeLoading ? "处理中…" : "Import（导入）写入 VectorStore（向量库）"}
         </button>
         <button
           type="button"
@@ -261,11 +293,11 @@ export function KnowledgeSidebar({
           onClick={() => void handleReindexKnowledge()}
           className="mt-2 w-full rounded-lg border border-sky-300 bg-white px-3 py-1.5 text-xs font-semibold text-sky-700 disabled:opacity-50 dark:border-sky-800 dark:bg-zinc-950/40 dark:text-sky-200"
         >
-          Reindex 重建索引与向量
+          Reindex（重建索引）与向量
         </button>
         <p className="mt-2 text-[11px] text-zinc-500">已导入 {knowledgeDocCount} 篇文档</p>
         <div className="mt-3 rounded-lg border border-sky-200/70 bg-white/60 px-2 py-2 dark:border-sky-900/40 dark:bg-zinc-950/25">
-          <h3 className="text-xs font-semibold text-sky-950 dark:text-sky-100">Knowledge Explorer</h3>
+          <h3 className="text-xs font-semibold text-sky-950 dark:text-sky-100">Knowledge Explorer（知识浏览器）</h3>
           <ul className="mt-2 max-h-56 space-y-2 overflow-y-auto pr-1">
             {knowledgeDocuments.length === 0 ? (
               <li className="text-[11px] text-zinc-400">暂无文档；导入后会展示版本、hash 与 chunk。</li>
@@ -273,16 +305,16 @@ export function KnowledgeSidebar({
               knowledgeDocuments.map((doc) => (
                 <li key={doc.id} className="rounded-lg border border-sky-100 bg-sky-50/70 px-2 py-2 text-[10px] dark:border-sky-900/40 dark:bg-sky-950/20">
                   <p className="break-words font-semibold text-sky-950 dark:text-sky-100">
-                    {doc.title} · v{doc.version} · {doc.chunkCount} chunks
+                    {doc.title} · v{doc.version} · {doc.chunkCount} chunks（分块）
                   </p>
                   <p className="mt-0.5 font-mono text-sky-800/90 dark:text-sky-200/90">
-                    hash: {doc.contentHash} · {new Date(doc.updatedAt).toLocaleString("zh-CN")}
+                    hash（哈希）: {doc.contentHash} · {new Date(doc.updatedAt).toLocaleString("zh-CN")}
                   </p>
                   <ul className="mt-1 max-h-28 space-y-1 overflow-y-auto">
                     {doc.chunks.map((chunk) => (
                       <li key={chunk.id} className="rounded border border-sky-100/80 bg-white/70 px-1.5 py-1 dark:border-sky-900/40 dark:bg-zinc-950/30">
                         <p className="font-mono text-sky-900 dark:text-sky-100">
-                          #{chunk.index} · vector: {chunk.hasVector ? "yes" : "no"} · hash: {chunk.chunkHash}
+                          #{chunk.index} · vector（向量）: {chunk.hasVector ? "yes" : "no"} · hash（哈希）: {chunk.chunkHash}
                         </p>
                         <p className="line-clamp-2 text-zinc-600 dark:text-zinc-400">{chunk.preview}</p>
                       </li>
@@ -294,7 +326,7 @@ export function KnowledgeSidebar({
           </ul>
         </div>
         <div className="mt-3 rounded-lg border border-cyan-200/70 bg-white/60 px-2 py-2 dark:border-cyan-900/40 dark:bg-zinc-950/25">
-          <h3 className="text-xs font-semibold text-cyan-950 dark:text-cyan-100">Vector Explorer</h3>
+          <h3 className="text-xs font-semibold text-cyan-950 dark:text-cyan-100">Vector Explorer（向量浏览器）</h3>
           <ul className="mt-2 max-h-44 space-y-1.5 overflow-y-auto pr-1">
             {vectorRecords.length === 0 ? (
               <li className="text-[11px] text-zinc-400">暂无向量；导入文档后会展示 chunkId、documentId 与维度。</li>
@@ -317,10 +349,10 @@ export function KnowledgeSidebar({
         </div>
       </div>
 
-      <div className="shrink-0 border-b border-amber-200/70 px-4 py-3 dark:border-amber-900/40">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">RAG Debug Panel</h2>
+      <div className={activePanel === "knowledge" ? "shrink-0 border-b border-amber-200/70 px-4 py-3 dark:border-amber-900/40" : "hidden"}>
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">RAG Debug Panel（调试面板）</h2>
         <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-          第35天：RAG 仍先走 Local Vector Store 召回，再回查 KnowledgeStore；后台任务可按优先级、定时规则、WorkerPool、资源限制和速率限制执行。
+          第35天：RAG 仍先走 Local Vector Store（本地向量库）召回，再回查 KnowledgeStore（知识存储）；后台任务可按优先级、定时规则、WorkerPool（工作线程池）、资源限制和速率限制执行。
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           <input
@@ -328,7 +360,7 @@ export function KnowledgeSidebar({
             value={ragDebugQuery}
             onChange={(e) => setRagDebugQuery(e.target.value)}
             className="min-w-0 flex-1 rounded-lg border border-amber-200/80 bg-white/80 px-2 py-1 text-xs dark:border-amber-800/50 dark:bg-zinc-950/40"
-            placeholder="Query"
+            placeholder="Query（查询）"
           />
           <select
             value={ragDebugMode}
@@ -378,18 +410,18 @@ export function KnowledgeSidebar({
           检索
         </button>
         <p className="mt-2 font-mono text-[10px] text-amber-900 dark:text-amber-100">
-          Query: {ragDebugQuery || "—"} · mode: {ragDebugMode} · recallK: {ragDebugRecallK} · topK:{" "}
-          {ragDebugTopK} · minScore: {ragDebugMinScore} · hits: {ragDebugHits.length}
+          Query(查询): {ragDebugQuery || "—"} · mode(模式): {ragDebugMode} · recallK(召回数): {ragDebugRecallK} · topK(返回数):{" "}
+          {ragDebugTopK} · minScore(最低分): {ragDebugMinScore} · hits(命中): {ragDebugHits.length}
         </p>
         {ragDebugRewrite ? (
           <div className="mt-2 rounded-lg border border-amber-200/70 bg-amber-50/60 px-2 py-2 text-[10px] dark:border-amber-800/40 dark:bg-amber-950/20">
             <p className="font-semibold text-amber-900 dark:text-amber-100">
-              Original Query: {ragDebugRewrite.originalQuery}
+              Original Query（原始查询）: {ragDebugRewrite.originalQuery}
             </p>
             <p className="mt-1 break-words font-mono text-[9px] text-amber-800 dark:text-amber-200">
-              ambiguous: {String(ragDebugRewrite.ambiguous ?? false)} · rewriteMode:{" "}
-              {ragDebugRewrite.rewriteMode ?? "rule"} · memory: {ragDebugRewrite.usedMemory ? "yes" : "no"} · recent:{" "}
-              {ragDebugRewrite.usedRecentMessages ? "yes" : "no"} · topics:{" "}
+              ambiguous(有歧义): {String(ragDebugRewrite.ambiguous ?? false)} · rewriteMode(改写模式):{" "}
+              {ragDebugRewrite.rewriteMode ?? "rule"} · memory(使用记忆): {ragDebugRewrite.usedMemory ? "yes" : "no"} · recent(使用近期消息):{" "}
+              {ragDebugRewrite.usedRecentMessages ? "yes" : "no"} · topics(主题):{" "}
               {(ragDebugRewrite.knowledgeTopicsUsed ?? []).join(" | ") || "none"}
             </p>
             <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-amber-800 dark:text-amber-200">
@@ -404,7 +436,7 @@ export function KnowledgeSidebar({
         <ul className="mt-2 max-h-48 space-y-2 overflow-y-auto">
           {ragDebugHits.length === 0 ? (
             <li className="text-[11px] text-zinc-400">
-              无合格检索结果（可能未 Import、或 score 低于 minScore）；ragAnswer 将走 fallback。
+              无合格检索结果（可能未 Import（导入）、或 score（分数）低于 minScore（最低分））；ragAnswer（基于知识回答）将走 fallback（兜底）。
             </li>
           ) : (
             ragDebugHits.map((hit, i) => (
@@ -413,19 +445,19 @@ export function KnowledgeSidebar({
                 className="rounded-lg border border-amber-200/60 bg-amber-50/50 px-2 py-1.5 text-[10px] dark:border-amber-800/40 dark:bg-amber-950/20"
               >
                 <p className="font-semibold text-amber-900 dark:text-amber-100">
-                  #{hit.finalRank ?? i + 1} · mode: {hit.retrievalMode ?? ragDebugMode} · chunk #{hit.chunkIndex} ·
-                  offset {hit.startOffset}-{hit.endOffset}
+                  #{hit.finalRank ?? i + 1} · mode(模式): {hit.retrievalMode ?? ragDebugMode} · chunk(分块) #{hit.chunkIndex} ·
+                  offset(偏移) {hit.startOffset}-{hit.endOffset}
                 </p>
                 <p className="font-mono text-amber-900/90 dark:text-amber-100/90">
-                  vector: {hit.vectorScore ?? hit.score} · keyword: {hit.keywordScore ?? 0} · hybrid:{" "}
-                  {hit.hybridScore ?? hit.score} · rerank: {hit.rerankScore ?? hit.score}
+                  vector(向量): {hit.vectorScore ?? hit.score} · keyword(关键词): {hit.keywordScore ?? 0} · hybrid(混合):{" "}
+                  {hit.hybridScore ?? hit.score} · rerank(重排): {hit.rerankScore ?? hit.score}
                 </p>
                 <p className="text-amber-800/90 dark:text-amber-200/90">
-                  doc: {hit.documentTitle} ({hit.documentId})
+                  doc(文档): {hit.documentTitle} ({hit.documentId})
                 </p>
                 {hit.matchedQueries?.length ? (
                   <p className="mt-0.5 break-words font-mono text-[9px] text-amber-700/90 dark:text-amber-300/90">
-                    matched: {hit.matchedQueries.join(" | ")}
+                    matched(匹配查询): {hit.matchedQueries.join(" | ")}
                   </p>
                 ) : null}
                 <p className="mt-0.5 line-clamp-3 text-zinc-600 dark:text-zinc-400">{hit.text}</p>
@@ -435,10 +467,10 @@ export function KnowledgeSidebar({
         </ul>
       </div>
 
-      <div className="border-b border-violet-200/70 px-4 py-4 dark:border-violet-900/40">
+      <div className={activePanel === "records" ? "border-b border-violet-200/70 px-4 py-4 dark:border-violet-900/40" : "hidden"}>
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">历史 Workflow</h2>
         <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-          经 WorkflowStore（{storageMode}）持久化；点击条目可恢复到对话区（含 paused 确认按钮）。
+          经 WorkflowStore（工作流存储，{storageMode}）持久化；点击条目可恢复到对话区（含 paused（暂停）确认按钮）。
         </p>
         <ul className="mt-3 max-h-36 space-y-2 overflow-y-auto">
           {workflowHistory.length === 0 ? (
@@ -476,22 +508,22 @@ export function KnowledgeSidebar({
         </ul>
       </div>
 
-      <div className="border-b border-zinc-200/70 px-4 py-4 dark:border-zinc-800/80">
+      <div className={activePanel === "records" ? "border-b border-zinc-200/70 px-4 py-4 dark:border-zinc-800/80" : "hidden"}>
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">长期记忆</h2>
         <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-          服务端返回的 Memory，便于观察路由与压缩效果。
+          服务端返回的 Memory（记忆），便于观察 routing（路由）与 compression（压缩）效果。
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <span className="rounded-lg bg-zinc-100 px-2 py-1 font-mono text-[11px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-            short {memory.shortTerm.length}
+            short（短期） {memory.shortTerm.length}
           </span>
           <span className="rounded-lg bg-zinc-100 px-2 py-1 font-mono text-[11px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-            items {memory.items.length}
+            items（条目） {memory.items.length}
           </span>
         </div>
       </div>
 
-      <ul className="flex-1 min-h-0 space-y-2 overflow-y-auto px-3 py-3">
+      <ul className={activePanel === "records" ? "flex-1 min-h-0 space-y-2 overflow-y-auto px-3 py-3" : "hidden"}>
         {memory.items.length === 0 ? (
           <li className="rounded-xl border border-dashed border-zinc-200 px-3 py-8 text-center text-xs text-zinc-400 dark:border-zinc-700 dark:text-zinc-500">
             暂无条目；多聊几句或触发总结后会出现。

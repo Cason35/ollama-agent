@@ -92,9 +92,16 @@ export default function HomePage() {
         const resultWorkflow = match.result?.workflow; // 读取 Worker 写入的完整 Workflow。
         const resultSummary = match.result?.finalSummary; // 读取 Worker 写入的最终摘要。
         if (!resultWorkflow || typeof resultWorkflow !== "object" || typeof resultSummary !== "string") return bubble; // 结果形状不完整时不更新。
-        if (bubble.finalSummary === resultSummary && bubble.workflow.status === (resultWorkflow as typeof bubble.workflow).status) return bubble; // 内容一致时避免重复渲染。
+        const nextWorkflow = resultWorkflow as typeof bubble.workflow; // 规范为当前气泡的 Workflow 类型。
+        const bubbleAlreadyAdvanced =
+          bubble.workflow.status === "success" ||
+          bubble.workflow.status === "failed" ||
+          bubble.workflow.status === "cancelled" ||
+          (bubble.paused === false && nextWorkflow.status === "paused"); // 防止旧的 paused Job 结果覆盖用户确认后的新状态。
+        if (bubbleAlreadyAdvanced) return bubble; // 当前聊天气泡已比队列快照更新时，不回滚到旧状态。
+        if (bubble.finalSummary === resultSummary && bubble.workflow.status === nextWorkflow.status) return bubble; // 内容一致时避免重复渲染。
         changed = true; // 标记需要更新。
-        return { ...bubble, workflow: resultWorkflow as typeof bubble.workflow, finalSummary: resultSummary, paused: (resultWorkflow as typeof bubble.workflow).status === "paused" }; // 回填 Worker 的 workflow 与摘要。
+        return { ...bubble, workflow: nextWorkflow, finalSummary: resultSummary, paused: nextWorkflow.status === "paused" }; // 回填 Worker 的 workflow 与摘要。
       }); // 结束气泡遍历。
       return changed ? next : prev; // 有变化才返回新数组。
     }); // 结束 setBubbles。
@@ -623,20 +630,20 @@ export default function HomePage() {
       if (data.type !== "workflow") return; // 类型守卫
       setMemory(data.memory); // 更新记忆
       await persistWorkflowBubble(data); // 第20天：确认/取消后更新 Store
-      scheduleBubblesCommit(
-        bubbles.map((b, i) =>
+      setBubbles((prev) =>
+        prev.map((b, i) =>
           i === bubbleIndex && b.role === "assistant" && b.variant === "workflow"
             ? {
                 role: "assistant", // 助手
                 variant: "workflow", // 工作流
                 workflow: data.workflow, // 新状态
                 finalSummary: data.finalSummary, // 新摘要
-                paused: data.paused, // 可能再次暂停
-                waitingStepId: data.waitingStepId, // 下一步待确认
+                paused: data.paused === true, // 可能再次暂停；完成时显式 false，避免旧 paused 残留
+                waitingStepId: data.paused ? data.waitingStepId : undefined, // 完成/取消时清空待确认步骤
               }
             : b
         ) // map 更新单气泡
-      ); // scheduleBubblesCommit
+      ); // setBubbles
     } catch (error) {
       console.error(error); // 控制台
       setErrorText(
@@ -679,7 +686,7 @@ export default function HomePage() {
 
   return (
     <main className="h-screen overflow-hidden bg-zinc-100 font-sans text-zinc-950 dark:bg-zinc-950 dark:text-zinc-50">
-      <div className="mx-auto flex h-full max-w-[1360px] flex-col px-4 py-4 sm:px-5 lg:px-6">
+      <div className="mx-auto flex h-full max-w-[1500px] flex-col px-4 py-4 sm:px-5 lg:px-6">
           <Header
             provider={provider}
             useWorkflow={useWorkflow}

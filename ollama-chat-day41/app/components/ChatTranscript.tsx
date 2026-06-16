@@ -74,7 +74,12 @@ export function ChatTranscript({ bubbles, loading, listRef, handleWorkflowConfir
         }
 
         if (msg.variant === "workflow") {
-          const waitingStep = msg.paused && msg.waitingStepId ? msg.workflow.steps.find((step) => step.id === msg.waitingStepId) : undefined; // 找到待确认步骤
+          const waitingStep =
+            (msg.waitingStepId ? msg.workflow.steps.find((step) => step.id === msg.waitingStepId) : undefined) ??
+            msg.workflow.steps.find((step) => step.status === "waiting_confirmation") ??
+            msg.workflow.steps.find((step) => step.requiresConfirmation && !step.confirmed); // 找到待确认步骤；兼容 paused 快照未携带 waitingStepId 的情况
+          const waitingStepId = msg.waitingStepId ?? waitingStep?.id; // 优先使用 API 返回的 stepId，否则从步骤状态推断
+          const isWaitingForHuman = Boolean(waitingStep && waitingStepId && (msg.paused || msg.workflow.status === "paused" || waitingStep.status === "waiting_confirmation")); // HITL 展示条件
           return (
             <div key={`workflow-${index}`} className="flex justify-start">
               <div className="max-w-[min(100%,42rem)] overflow-hidden rounded-xl rounded-bl-sm border border-violet-200 bg-violet-50 shadow-sm dark:border-violet-900/50 dark:bg-violet-950/30">
@@ -135,12 +140,14 @@ export function ChatTranscript({ bubbles, loading, listRef, handleWorkflowConfir
                     </ul>
                   </div>
                 ) : null}
-                {msg.paused && waitingStep && msg.waitingStepId ? (
+                {isWaitingForHuman && waitingStep && waitingStepId ? (
                   <div className="border-t border-sky-300 bg-sky-50 px-4 py-3 dark:border-sky-800 dark:bg-sky-950/30">
-                    <p className="mb-2 text-sm font-semibold text-sky-900 dark:text-sky-100">{waitingStep.confirmationMessage || `是否继续执行：${waitingStep.name}？`}</p>
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => handleWorkflowConfirm(index, msg.workflow.id, msg.waitingStepId!, "confirm")} className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white">确认执行</button>
-                      <button type="button" onClick={() => handleWorkflowConfirm(index, msg.workflow.id, msg.waitingStepId!, "cancel")} className="rounded-lg border border-sky-300 bg-white px-3 py-1.5 text-xs font-medium text-sky-800 dark:border-sky-700 dark:bg-sky-950 dark:text-sky-100">取消</button>
+                    <p className="text-[10px] font-semibold uppercase text-sky-700 dark:text-sky-300">HITL（人在回路确认）</p>
+                    <p className="mt-1 text-sm font-semibold text-sky-900 dark:text-sky-100">{waitingStep.confirmationMessage || `是否继续执行：${waitingStep.name}？`}</p>
+                    <p className="mt-1 text-[11px] text-sky-700 dark:text-sky-300">该步骤需要你明确选择后，Workflow（工作流）才会继续或取消。</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button type="button" disabled={loading} onClick={() => handleWorkflowConfirm(index, msg.workflow.id, waitingStepId, "confirm")} className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:opacity-50">确认继续</button>
+                      <button type="button" disabled={loading} onClick={() => handleWorkflowConfirm(index, msg.workflow.id, waitingStepId, "cancel")} className="rounded-lg border border-sky-300 bg-white px-3 py-1.5 text-xs font-medium text-sky-800 transition hover:bg-sky-100 disabled:opacity-50 dark:border-sky-700 dark:bg-sky-950 dark:text-sky-100 dark:hover:bg-sky-900/60">取消工作流</button>
                     </div>
                   </div>
                 ) : null}

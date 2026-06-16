@@ -449,4 +449,385 @@ Day40 是“动态选择 Agent（智能体）”，Day41 是“动态编排 Agen
 ```text
 当前系统已经从 Day40 的 Supervisor Multi-Agent Runtime（监督者多智能体运行时）升级为 Day41 的 Agent DAG Runtime（智能体有向无环图运行时）。系统可以由 Supervisor Agent（监督智能体）根据用户目标生成 Agent DAG Plan（智能体有向无环图计划），用 AgentPlan Validator（智能体计划校验器）检查计划合法性，再由 Agent DAG Executor（智能体有向无环图执行器）按依赖批次执行。执行过程中，同一批可运行节点支持 Parallel Agent Execution（并行智能体执行），每个节点结果会保存到 Agent Result Store（智能体结果存储），下游节点通过 Agent Context Merge（智能体上下文合并）读取多个父级结果。前端右侧 Agent DAG Runtime Dashboard（智能体有向无环图运行时看板）可以展示 Supervisor Decision（监督者决策）、Agent Plan Steps（智能体计划步骤）、Agent DAG Visualizer（智能体有向无环图可视化器）、Agent DAG Metrics（智能体有向无环图指标）、Agent Call Graph（智能体调用图）和 Agent Plan Timeline（智能体计划时间线）。
 ```
+## 12. 第 41 天补充总结：Agent DAG Orchestration（智能体有向无环图编排）
+
+第 41 天完成的是：
+
+**Multi-Agent Runtime V3（多智能体运行时第 3 版）：Agent DAG Orchestration（智能体有向无环图编排）**
+
+这一步非常关键。
+
+系统已经从：
+
+- `Supervisor`（监督智能体）生成线性 `Agent Plan`（智能体计划）
+
+升级成：
+
+- `Supervisor`（监督智能体）生成 `Agent DAG`（智能体有向无环图）
+
+也就是说，多智能体系统现在已经支持：
+
+- `AgentPlanStep`（智能体计划步骤）
+- `dependsOn`（依赖项）
+- `Agent DAG Plan`（智能体有向无环图计划）
+- `AgentPlan Validator`（智能体计划校验器）
+- 循环依赖检测
+- 缺失依赖检测
+- 孤儿节点检测
+- `Agent DAG Executor`（智能体有向无环图执行器）
+- `Parallel Agent Execution`（并行智能体执行）
+- `Agent Result Store`（智能体结果存储）
+- `Agent Context Merge`（智能体上下文合并）
+- `Agent DAG Visualizer`（智能体有向无环图可视化器）
+
+这意味着系统已经不是简单的：
+
+```text
+多个 Agent（智能体）顺序执行
+```
+
+而是：
+
+```text
+多个 Agent（智能体）按依赖关系并行协作
+```
+
+这已经非常接近 `LangGraph`（图式智能体工作流框架）、`CrewAI Flow`（CrewAI 流程式多智能体编排）和 `AutoGen Graph`（图式多智能体协作）的核心思想。
+
+第 41 天真正完成的升级，不只是把一个数组执行顺序改成图结构，而是让系统开始理解“依赖关系”“并行执行”“结果存储”和“上下文合并”。这代表系统已经从线性 `Multi-Agent Runtime`（多智能体运行时）进入了图式 `Agent Runtime`（智能体运行时）的阶段。
+
+---
+
+## 13. 第 42 天学习计划：Agent Memory + Shared Workspace（智能体记忆 + 共享工作空间）
+
+第 42 天的主题是：
+
+**Multi-Agent Runtime V4（多智能体运行时第 4 版）：Agent Memory + Shared Workspace（智能体记忆 + 共享工作空间）**
+
+### 13.1 今日核心目标
+
+让多个 `Agent`（智能体）不只是传递结果，而是共享一个“工作空间”。
+
+也就是说，系统不再只依赖上游结果传给下游，而是让所有智能体围绕同一个 `Workspace`（工作空间）协作，把研究记录、草稿、决策和最终结果都沉淀到同一个地方。
+
+### 13.2 为什么第 42 天要做这个
+
+现在的 `Agent`（智能体）之间主要依靠：
+
+```text
+parentResults
+```
+
+也就是：
+
+```text
+上游 Agent（智能体）输出 -> 下游 Agent（智能体）输入
+```
+
+这种方式更像“链路传参”。它适合表达明确的前后依赖，但真实 `Multi-Agent`（多智能体）系统里，智能体往往还需要共享：
+
+- 中间笔记
+- 研究发现
+- 草稿
+- 决策记录
+- 待解决问题
+- 最终交付物
+
+这就需要 `Shared Workspace`（共享工作空间）。
+
+### 13.3 第 42 天最终效果
+
+执行一个任务：
+
+```text
+帮我研究 LangGraph（图式智能体工作流框架）并生成学习路线
+```
+
+系统中的多个 `Agent`（智能体）会写入同一个 `Workspace`（工作空间）：
+
+- `Research Agent`（研究智能体）写入：`LangGraph`（图式智能体工作流框架）是什么、核心概念、资料摘要
+- `Planner Agent`（规划智能体）写入：学习阶段、每日任务
+- `Critic Agent`（评审智能体）写入：计划漏洞、风险点
+- `Writer Agent`（写作智能体）写入：最终输出
+
+前端可以看到：
+
+```text
+Shared Workspace（共享工作空间）
+├─ notes（笔记）
+├─ findings（研究发现）
+├─ drafts（草稿）
+├─ decisions（决策）
+└─ final（最终结果）
+```
+
+### 13.4 任务 1：定义 Workspace（工作空间）
+
+新增：
+
+```ts
+type Workspace = {
+  id: string
+  goal: string
+
+  entries: WorkspaceEntry[]
+
+  createdAt: number
+  updatedAt: number
+}
+```
+
+`Workspace`（工作空间）表示一次多智能体协作的共享现场。它记录任务目标、全部条目、创建时间和更新时间。
+
+### 13.5 任务 2：定义 WorkspaceEntry（工作空间条目）
+
+新增：
+
+```ts
+type WorkspaceEntry = {
+  id: string
+
+  type:
+    | "note"
+    | "finding"
+    | "draft"
+    | "decision"
+    | "question"
+    | "final"
+
+  agentId: string
+
+  content: string
+
+  tags?: string[]
+
+  createdAt: number
+}
+```
+
+`WorkspaceEntry`（工作空间条目）表示某个 `Agent`（智能体）写入共享工作空间的一条内容。它可以是笔记、发现、草稿、决策、问题或最终结果。
+
+### 13.6 任务 3：实现 WorkspaceStore（工作空间存储）
+
+可以先用内存实现，也可以使用 `MySQL`（关系型数据库）。因为当前系统已经有 `MySQL`（关系型数据库）存储基础，所以建议直接使用 `MySQL`（关系型数据库）。
+
+接口设计：
+
+```ts
+interface WorkspaceStore {
+  create(workspace: Workspace): Promise<void>
+
+  get(id: string): Promise<Workspace | null>
+
+  addEntry(
+    workspaceId: string,
+    entry: WorkspaceEntry
+  ): Promise<void>
+
+  listEntries(workspaceId: string): Promise<WorkspaceEntry[]>
+}
+```
+
+`WorkspaceStore`（工作空间存储）负责创建工作空间、读取工作空间、追加条目和列出条目。
+
+### 13.7 任务 4：AgentContext 注入 Workspace（智能体上下文注入工作空间）
+
+升级：
+
+```ts
+type AgentContext = {
+  memory
+  tools
+  workflow
+  workspace?: Workspace
+}
+```
+
+执行 `Agent`（智能体）时：
+
+```ts
+executeAgent(agentId, task, {
+  workspace
+})
+```
+
+这样每个 `Agent`（智能体）执行时都能知道当前共享的 `Workspace`（工作空间）。
+
+### 13.8 任务 5：Agent 写入 Workspace（智能体写入工作空间）
+
+给 `AgentRuntime`（智能体运行时）增加：
+
+```ts
+writeWorkspaceEntry(
+  workspaceId,
+  entry
+)
+```
+
+例如 `Research Agent`（研究智能体）完成后：
+
+```ts
+await workspaceStore.addEntry(workspaceId, {
+  id: crypto.randomUUID(),
+  type: "finding",
+  agentId: "research",
+  content: result.output,
+  tags: ["research", "source"],
+  createdAt: Date.now()
+})
+```
+
+这样研究结果不会只停留在一次函数返回值里，而是会被写入共享工作空间，供后续智能体继续使用。
+
+### 13.9 任务 6：Agent 读取 Workspace（智能体读取工作空间）
+
+下游 `Agent`（智能体）执行前读取：
+
+```ts
+const entries = await workspaceStore.listEntries(workspaceId)
+```
+
+然后注入 `prompt`（提示词）：
+
+```ts
+【共享工作空间】
+${entries.map(e => `[${e.type}] ${e.agentId}: ${e.content}`).join("\n")}
+```
+
+这样 `Planner Agent`（规划智能体）、`Critic Agent`（评审智能体）和 `Writer Agent`（写作智能体）都可以基于共享资料继续工作。
+
+### 13.10 任务 7：Workspace Summarizer（工作空间摘要器）
+
+`Workspace`（工作空间）会越来越长，所以需要压缩。
+
+新增工具或函数：
+
+```ts
+summarizeWorkspace(workspaceId)
+```
+
+生成：
+
+```text
+Workspace Summary（工作空间摘要）
+```
+
+保存为：
+
+```text
+type = "decision" 或 "note"
+```
+
+`Workspace Summarizer`（工作空间摘要器）的作用是把不断增长的共享内容压缩成更短、更稳定的上下文，避免后续 `prompt`（提示词）过长。
+
+### 13.11 任务 8：Workspace Explorer（工作空间浏览器）
+
+前端展示：
+
+```text
+Workspace（工作空间）
+Goal（目标）: ...
+
+Findings（研究发现）
+- ...
+
+Drafts（草稿）
+- ...
+
+Decisions（决策）
+- ...
+
+Final（最终结果）
+- ...
+```
+
+支持按下面字段过滤：
+
+- `type`（条目类型）
+- `agentId`（智能体 ID）
+- `tag`（标签）
+
+`Workspace Explorer`（工作空间浏览器）让用户能看到多个智能体共同完成任务时的协作过程，而不是只看到最后答案。
+
+### 13.12 任务 9：Workspace Metrics（工作空间指标）
+
+新增：
+
+```ts
+type WorkspaceMetrics = {
+  entryCount: number
+  entriesByType: Record<string, number>
+  entriesByAgent: Record<string, number>
+  lastUpdatedAt: number
+}
+```
+
+`Workspace Metrics`（工作空间指标）用于展示当前工作空间的条目数量、不同类型条目的数量、不同智能体写入的数量和最后更新时间。
+
+### 13.13 任务 10：完整测试
+
+测试任务：
+
+```text
+研究 LangGraph（图式智能体工作流框架）并生成学习路线
+```
+
+预期流程：
+
+- `Research Agent`（研究智能体）写入 `finding`（研究发现）
+- `Planner Agent`（规划智能体）读取 `finding`（研究发现），写入 `draft`（草稿）
+- `Critic Agent`（评审智能体）读取 `draft`（草稿），写入 `decision`（决策）或 `question`（问题）
+- `Writer Agent`（写作智能体）读取全部内容，写入 `final`（最终结果）
+
+### 13.14 第 42 天验收标准
+
+1. 是否定义 `Workspace`（工作空间）
+2. 是否定义 `WorkspaceEntry`（工作空间条目）
+3. 是否实现 `WorkspaceStore`（工作空间存储）
+4. `AgentContext`（智能体上下文）是否注入 `Workspace`（工作空间）
+5. `Agent`（智能体）是否能写入 `Workspace`（工作空间）
+6. `Agent`（智能体）是否能读取 `Workspace`（工作空间）
+7. 是否实现 `Workspace Summarizer`（工作空间摘要器）
+8. 是否实现 `Workspace Explorer`（工作空间浏览器）
+9. 是否增加 `Workspace Metrics`（工作空间指标）
+10. 是否完成多 `Agent Workspace`（智能体工作空间）测试
+
+### 13.15 第 42 天打卡模板
+
+【第42天打卡】
+
+1. 是否定义 `Workspace`（工作空间）：是 / 否
+2. 是否定义 `WorkspaceEntry`（工作空间条目）：是 / 否
+3. 是否实现 `WorkspaceStore`（工作空间存储）：是 / 否
+4. `AgentContext`（智能体上下文）是否注入 `Workspace`（工作空间）：是 / 否
+5. `Agent`（智能体）是否能写入 `Workspace`（工作空间）：是 / 否
+6. `Agent`（智能体）是否能读取 `Workspace`（工作空间）：是 / 否
+7. 是否实现 `Workspace Summarizer`（工作空间摘要器）：是 / 否
+8. 是否实现 `Workspace Explorer`（工作空间浏览器）：是 / 否
+9. 是否增加 `Workspace Metrics`（工作空间指标）：是 / 否
+10. 是否完成多 `Agent Workspace`（智能体工作空间）测试：是 / 否
+
+11. 遇到的最大问题：
+
+```text
+待填写。
+```
+
+12. 当前系统能力：
+
+```text
+待填写。
+```
+
+### 13.16 第 42 天核心认知
+
+记住一句话：
+
+```text
+parentResults（父级结果集合）是“链路传参”，Workspace（工作空间）是“团队协作现场”。
+```
+
+完成第 42 天后，系统会升级成：
+
+**Multi-Agent Runtime V4（多智能体运行时第 4 版）：Shared Workspace Collaboration（共享工作空间协作）**
 

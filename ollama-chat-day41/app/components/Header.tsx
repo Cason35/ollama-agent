@@ -30,16 +30,16 @@ export function Header({
             Day 41
           </p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-3xl">
-            Agent DAG Runtime · Parallel Multi-Agent Planning
+            Agent DAG Runtime（智能体有向无环图运行时） · Parallel Multi-Agent Planning（并行多智能体规划）
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-            第41天：在 Day40 的 Supervisor 动态规划基础上升级为 Agent DAG Planning，让可并行节点同批执行，并用 Result Store 汇总多个父级结果。
-            Queue、Workflow、RAG、Tool Registry 与 WorkerPool 链路继续保留，侧栏仍可 Import 笔记、观察向量写入并调试检索；需
+            第41天：在 Day40 的 Supervisor（监督者）动态规划基础上升级为 Agent DAG Planning（智能体 DAG 规划），让可并行节点同批执行，并用 Result Store（结果存储）汇总多个父级结果。
+            Queue（队列）、Workflow（工作流）、RAG（检索增强生成）、Tool Registry（工具注册表）与 WorkerPool（工作线程池）链路继续保留，侧栏仍可 Import（导入）笔记、观察向量写入并调试检索；需
             Ollama{" "}
             <code className="rounded-md bg-zinc-200/70 px-1.5 py-0.5 font-mono text-xs text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200">
               nomic-embed-text
             </code>
-            。继承 Workflow / HITL / Storage（local·MySQL）与 MiMo，配置见{" "}
+            。继承 Workflow（工作流）/ HITL（人在回路确认）/ Storage（存储，local·MySQL）与 MiMo，配置见{" "}
             <code className="rounded-md bg-zinc-200/70 px-1.5 py-0.5 font-mono text-xs text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200">
               .env.local
             </code>
@@ -51,11 +51,11 @@ export function Header({
           </span>
           {useWorkflow ? (
             <span className="inline-flex items-center rounded-full bg-violet-500/15 px-3 py-1 text-xs font-medium text-violet-800 ring-1 ring-violet-500/25 dark:text-violet-200">
-              Workflow 开
+              Workflow（工作流）开
             </span>
           ) : null}
           <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-800 ring-1 ring-emerald-500/25 dark:text-emerald-200">
-            Storage: {storageMode}
+            Storage（存储）: {storageMode}
           </span>
           {restoredFromDisk && hasPausedWorkflow ? (
             <span className="inline-flex items-center rounded-full bg-sky-500/15 px-3 py-1 text-xs font-medium text-sky-800 ring-1 ring-sky-500/25 dark:text-sky-200">

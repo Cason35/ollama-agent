@@ -19,10 +19,10 @@ function formatRate(rate: number): string { /* 定义成功率格式化函数。
 function SupervisorDecision({ plan }: { plan: AgentPlan }) { /* 定义 Supervisor 决策展示组件。 */
   return ( /* 返回 Supervisor 决策视图。 */
     <div className="mt-3 rounded-lg border border-fuchsia-200/70 bg-white/70 px-2 py-2 dark:border-fuchsia-900/40 dark:bg-zinc-950/25"> {/* 定义决策面板容器。 */}
-      <p className="text-[11px] font-semibold text-fuchsia-950 dark:text-fuchsia-100">Supervisor Decision</p> {/* 展示决策标题。 */}
-      <p className="mt-1 text-[10px] leading-relaxed text-zinc-600 dark:text-zinc-300">Goal: {plan.goal}</p> {/* 展示用户目标。 */}
-      <p className="mt-1 font-mono text-[10px] text-fuchsia-800 dark:text-fuchsia-200">Selected Agents: {plan.selectedAgents.join(", ")}</p> {/* 展示已选择智能体。 */}
-      <p className="mt-1 text-[10px] leading-relaxed text-zinc-600 dark:text-zinc-300">Reason: {plan.reason}</p> {/* 展示 Supervisor 决策原因。 */}
+      <p className="text-[11px] font-semibold text-fuchsia-950 dark:text-fuchsia-100">Supervisor Decision（监督者决策）</p> {/* 展示决策标题。 */}
+      <p className="mt-1 text-[10px] leading-relaxed text-zinc-600 dark:text-zinc-300">Goal（目标）: {plan.goal}</p> {/* 展示用户目标。 */}
+      <p className="mt-1 font-mono text-[10px] text-fuchsia-800 dark:text-fuchsia-200">Selected Agents（已选智能体）: {plan.selectedAgents.join(", ")}</p> {/* 展示已选择智能体。 */}
+      <p className="mt-1 text-[10px] leading-relaxed text-zinc-600 dark:text-zinc-300">Reason（原因）: {plan.reason}</p> {/* 展示 Supervisor 决策原因。 */}
     </div> /* 结束决策面板容器。 */
   ); /* 结束返回。 */
 } /* 结束 SupervisorDecision 组件。 */
@@ -30,13 +30,13 @@ function SupervisorDecision({ plan }: { plan: AgentPlan }) { /* 定义 Superviso
 function AgentPlanSteps({ plan }: { plan: AgentPlan }) { /* 定义智能体计划步骤展示组件。 */
   return ( /* 返回计划步骤视图。 */
     <div className="mt-3 rounded-lg border border-fuchsia-200/70 bg-white/70 px-2 py-2 dark:border-fuchsia-900/40 dark:bg-zinc-950/25"> {/* 定义步骤面板容器。 */}
-      <p className="text-[11px] font-semibold text-fuchsia-950 dark:text-fuchsia-100">Agent Plan Steps</p> {/* 展示步骤标题。 */}
+      <p className="text-[11px] font-semibold text-fuchsia-950 dark:text-fuchsia-100">Agent Plan Steps（智能体计划步骤）</p> {/* 展示步骤标题。 */}
       <ol className="mt-2 space-y-1"> {/* 定义步骤列表。 */}
         {plan.steps.map((step, index) => ( /* 遍历计划步骤。 */
           <li key={step.id} className="rounded-md border border-fuchsia-100 bg-fuchsia-50/70 px-2 py-1 text-[10px] dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20"> {/* 定义单个步骤卡片。 */}
             <p className="font-mono font-semibold text-fuchsia-900 dark:text-fuchsia-100">{index + 1}. {step.agentId}</p> {/* 展示步骤序号和智能体。 */}
             <p className="mt-0.5 leading-relaxed text-zinc-600 dark:text-zinc-300">{step.task}</p> {/* 展示步骤任务。 */}
-            <p className="mt-0.5 font-mono text-[9px] text-zinc-500 dark:text-zinc-400">dependsOn: {(step.dependsOn ?? []).join(", ") || "-"}</p> {/* 展示步骤依赖。 */}
+            <p className="mt-0.5 font-mono text-[9px] text-zinc-500 dark:text-zinc-400">dependsOn（依赖）: {(step.dependsOn ?? []).join(", ") || "-"}</p> {/* 展示步骤依赖。 */}
           </li> /* 结束单个步骤卡片。 */
         ))} {/* 结束计划步骤遍历。 */}
       </ol> {/* 结束步骤列表。 */}
@@ -48,11 +48,11 @@ function AgentDAGVisualizer({ plan }: { plan: AgentPlan }) { /* 定义第41天 A
   const layers = plan.steps.reduce<Record<number, typeof plan.steps>>((acc, step) => { const depth = getStepDepth(step.id, plan.steps); return { ...acc, [depth]: [...(acc[depth] ?? []), step] }; }, {}); /* 按依赖深度把 DAG 节点分层。 */
   return ( /* 返回 DAG 可视化视图。 */
     <div className="mt-3 rounded-lg border border-fuchsia-200/70 bg-white/70 px-2 py-2 dark:border-fuchsia-900/40 dark:bg-zinc-950/25"> {/* 定义 DAG 面板容器。 */}
-      <p className="text-[11px] font-semibold text-fuchsia-950 dark:text-fuchsia-100">Agent DAG Visualizer</p> {/* 展示 DAG 可视化标题。 */}
+      <p className="text-[11px] font-semibold text-fuchsia-950 dark:text-fuchsia-100">Agent DAG Visualizer（智能体 DAG 可视化）</p> {/* 展示 DAG 可视化标题。 */}
       <div className="mt-2 space-y-2"> {/* 定义 DAG 层级容器。 */}
         {Object.entries(layers).map(([depth, steps]) => ( /* 遍历每一层 DAG 节点。 */
           <div key={depth} className="rounded-md border border-fuchsia-100 bg-fuchsia-50/70 px-2 py-1 dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20"> {/* 定义单层 DAG 容器。 */}
-            <p className="font-mono text-[9px] text-zinc-500 dark:text-zinc-400">depth {depth}</p> {/* 展示当前层级深度。 */}
+            <p className="font-mono text-[9px] text-zinc-500 dark:text-zinc-400">depth（深度） {depth}</p> {/* 展示当前层级深度。 */}
             <div className="mt-1 flex flex-wrap gap-1"> {/* 定义当前层级节点列表。 */}
               {steps.map((step) => ( /* 遍历当前层级的步骤。 */
                 <span key={step.id} className="rounded-md bg-white px-2 py-1 font-mono text-[10px] text-fuchsia-800 ring-1 ring-fuchsia-200 dark:bg-zinc-950/40 dark:text-fuchsia-200 dark:ring-fuchsia-900/50">{step.id} / {step.agentId}</span> /* 展示 DAG 节点名称和 Agent。 */
@@ -74,7 +74,7 @@ function getStepDepth(stepId: string, steps: AgentPlan["steps"]): number { /* �
 function AgentCallGraph({ edges }: { edges: AgentCallEdge[] }) { /* 定义智能体调用图展示组件。 */
   return ( /* 返回调用图视图。 */
     <div className="mt-3 rounded-lg border border-fuchsia-200/70 bg-white/70 px-2 py-2 dark:border-fuchsia-900/40 dark:bg-zinc-950/25"> {/* 定义调用图容器。 */}
-      <p className="text-[11px] font-semibold text-fuchsia-950 dark:text-fuchsia-100">Agent Call Graph</p> {/* 展示调用图标题。 */}
+      <p className="text-[11px] font-semibold text-fuchsia-950 dark:text-fuchsia-100">Agent Call Graph（智能体调用图）</p> {/* 展示调用图标题。 */}
       <div className="mt-2 space-y-1"> {/* 定义调用边列表。 */}
         {edges.map((edge) => ( /* 遍历调用图边。 */
           <div key={`${edge.fromAgentId}-${edge.toAgentId}-${edge.taskId}`} className="flex items-center gap-1.5 rounded-md bg-fuchsia-50 px-2 py-1 font-mono text-[10px] text-fuchsia-800 dark:bg-fuchsia-950/30 dark:text-fuchsia-200"> {/* 定义单条调用边。 */}
@@ -92,7 +92,7 @@ function AgentCallGraph({ edges }: { edges: AgentCallEdge[] }) { /* 定义智能
 function AgentTimeline({ events }: { events: AgentTimelineEvent[] }) { /* 定义智能体计划时间线展示组件。 */
   return ( /* 返回时间线视图。 */
     <div className="mt-3 rounded-lg border border-fuchsia-200/70 bg-white/70 px-2 py-2 dark:border-fuchsia-900/40 dark:bg-zinc-950/25"> {/* 定义时间线容器。 */}
-      <p className="text-[11px] font-semibold text-fuchsia-950 dark:text-fuchsia-100">Agent Plan Timeline</p> {/* 展示时间线标题。 */}
+      <p className="text-[11px] font-semibold text-fuchsia-950 dark:text-fuchsia-100">Agent Plan Timeline（智能体计划时间线）</p> {/* 展示时间线标题。 */}
       <ol className="mt-2 max-h-44 space-y-1 overflow-y-auto pr-1"> {/* 定义时间线事件列表。 */}
         {events.map((event) => ( /* 遍历时间线事件。 */
           <li key={event.id} className="rounded-md border border-fuchsia-100 bg-fuchsia-50/70 px-2 py-1 text-[10px] dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20"> {/* 定义单个时间线事件。 */}
@@ -136,8 +136,8 @@ export function AgentExplorer() { /* 导出第40天 Supervisor 协作看板组�
     <div className="shrink-0 border-b border-fuchsia-200/70 px-4 py-3 dark:border-fuchsia-900/40"> {/* 定义第40天模块容器。 */}
       <div className="flex items-start justify-between gap-3"> {/* 定义标题与徽标的横向布局。 */}
         <div> {/* 定义标题文本容器。 */}
-          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Agent DAG Runtime Dashboard</h2> {/* 展示第41天模块标题。 */}
-          <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">第41天：Supervisor Agent 生成 DAG 依赖图，并让可并行节点同时执行后再汇总。</p> {/* 展示第41天模块说明。 */}
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Agent DAG Runtime Dashboard（智能体 DAG 运行看板）</h2> {/* 展示第41天模块标题。 */}
+          <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">第41天：Supervisor Agent（监督者智能体）生成 DAG（有向无环图）依赖图，并让可并行节点同时执行后再汇总。</p> {/* 展示第41天模块说明。 */}
         </div> {/* 结束标题文本容器。 */}
         <span className="shrink-0 rounded-full bg-fuchsia-500/15 px-2.5 py-1 text-[10px] font-semibold text-fuchsia-800 ring-1 ring-fuchsia-500/25 dark:text-fuchsia-200">Day 41</span> {/* 展示第41天标记。 */}
       </div> {/* 结束标题与徽标布局。 */}
@@ -150,28 +150,28 @@ export function AgentExplorer() { /* 导出第40天 Supervisor 协作看板组�
         <> {/* 使用片段包裹已加载内容。 */}
           <div className="mt-3 grid grid-cols-2 gap-2 text-center"> {/* 定义运行时指标网格。 */}
             <div className="rounded-lg border border-fuchsia-200/70 bg-fuchsia-50/70 px-2 py-2 dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20"> {/* 定义执行任务指标卡。 */}
-              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">Executed</p> {/* 展示指标名称。 */}
+              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">Executed（已执行）</p> {/* 展示指标名称。 */}
               <p className="font-mono text-sm font-semibold text-fuchsia-950 dark:text-fuchsia-100">{payload.metrics.executedTasks}</p> {/* 展示执行任务数量。 */}
             </div> {/* 结束执行任务指标卡。 */}
             <div className="rounded-lg border border-fuchsia-200/70 bg-fuchsia-50/70 px-2 py-2 dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20"> {/* 定义委派任务指标卡。 */}
-              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">Delegated</p> {/* 展示指标名称。 */}
+              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">Delegated（已委派）</p> {/* 展示指标名称。 */}
               <p className="font-mono text-sm font-semibold text-fuchsia-950 dark:text-fuchsia-100">{payload.metrics.delegatedTasks}</p> {/* 展示委派任务数量。 */}
             </div> {/* 结束委派任务指标卡。 */}
             <div className="rounded-lg border border-fuchsia-200/70 bg-fuchsia-50/70 px-2 py-2 dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20"> {/* 定义成功率指标卡。 */}
-              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">Success</p> {/* 展示指标名称。 */}
+              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">Success（成功率）</p> {/* 展示指标名称。 */}
               <p className="font-mono text-sm font-semibold text-fuchsia-950 dark:text-fuchsia-100">{formatRate(payload.metrics.successRate)}</p> {/* 展示成功率。 */}
             </div> {/* 结束成功率指标卡。 */}
             <div className="rounded-lg border border-fuchsia-200/70 bg-fuchsia-50/70 px-2 py-2 dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20"> {/* 定义平均耗时指标卡。 */}
-              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">Avg ms</p> {/* 展示指标名称。 */}
+              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">Avg ms（平均毫秒）</p> {/* 展示指标名称。 */}
               <p className="font-mono text-sm font-semibold text-fuchsia-950 dark:text-fuchsia-100">{payload.metrics.avgTaskDuration}</p> {/* 展示平均任务耗时。 */}
             </div> {/* 结束平均耗时指标卡。 */}
           </div> {/* 结束运行时指标网格。 */}
 
           <div className="mt-3 rounded-lg border border-fuchsia-200/70 bg-white/70 px-2 py-2 dark:border-fuchsia-900/40 dark:bg-zinc-950/25"> {/* 定义能力搜索区域。 */}
-            <label className="text-[11px] font-semibold text-fuchsia-950 dark:text-fuchsia-100">Capability Search</label> {/* 展示能力搜索标签。 */}
+            <label className="text-[11px] font-semibold text-fuchsia-950 dark:text-fuchsia-100">Capability Search（能力搜索）</label> {/* 展示能力搜索标签。 */}
             <input type="text" value={search} onChange={(event) => setSearch(event.target.value)} className="mt-1 w-full rounded-lg border border-fuchsia-200/80 bg-white/80 px-2 py-1.5 text-xs dark:border-fuchsia-800/50 dark:bg-zinc-950/40" placeholder="supervise / research / plan / review / write" /> {/* 输入要搜索的能力。 */}
             <p className="mt-1 text-[10px] text-zinc-500 dark:text-zinc-400">匹配：{matchedAgents.length ? matchedAgents.map((agent) => agent.name).join(", ") : "暂无匹配"}</p> {/* 展示能力搜索结果。 */}
-            <p className="mt-1 font-mono text-[10px] text-fuchsia-800 dark:text-fuchsia-200">route supervise: {payload.routes.supervise ?? "-"} · route research: {payload.routes.research ?? "-"}</p> {/* 展示内置路由测试结果。 */}
+            <p className="mt-1 font-mono text-[10px] text-fuchsia-800 dark:text-fuchsia-200">route(路由) supervise: {payload.routes.supervise ?? "-"} · route research: {payload.routes.research ?? "-"}</p> {/* 展示内置路由测试结果。 */}
           </div> {/* 结束能力搜索区域。 */}
 
           <SupervisorDecision plan={payload.collaboration.plan} /> {/* 展示 Supervisor 决策。 */}
@@ -179,19 +179,19 @@ export function AgentExplorer() { /* 导出第40天 Supervisor 协作看板组�
           <AgentDAGVisualizer plan={payload.collaboration.plan} /> {/* 展示第41天 Agent DAG 可视化。 */}
           <div className="mt-3 grid grid-cols-2 gap-2 text-center"> {/* 定义第41天 DAG 指标网格。 */}
             <div className="rounded-lg border border-fuchsia-200/70 bg-fuchsia-50/70 px-2 py-2 dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20"> {/* 定义总步骤指标卡。 */}
-              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">DAG Steps</p> {/* 展示总步骤指标名称。 */}
+              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">DAG Steps（步骤数）</p> {/* 展示总步骤指标名称。 */}
               <p className="font-mono text-sm font-semibold text-fuchsia-950 dark:text-fuchsia-100">{payload.collaboration.dagMetrics.totalSteps}</p> {/* 展示 DAG 总步骤数量。 */}
             </div> {/* 结束总步骤指标卡。 */}
             <div className="rounded-lg border border-fuchsia-200/70 bg-fuchsia-50/70 px-2 py-2 dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20"> {/* 定义并行步骤指标卡。 */}
-              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">Parallel</p> {/* 展示并行步骤指标名称。 */}
+              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">Parallel（并行）</p> {/* 展示并行步骤指标名称。 */}
               <p className="font-mono text-sm font-semibold text-fuchsia-950 dark:text-fuchsia-100">{payload.collaboration.dagMetrics.parallelSteps}</p> {/* 展示可并行步骤数量。 */}
             </div> {/* 结束并行步骤指标卡。 */}
             <div className="rounded-lg border border-fuchsia-200/70 bg-fuchsia-50/70 px-2 py-2 dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20"> {/* 定义最大深度指标卡。 */}
-              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">Max Depth</p> {/* 展示最大深度指标名称。 */}
+              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">Max Depth（最大深度）</p> {/* 展示最大深度指标名称。 */}
               <p className="font-mono text-sm font-semibold text-fuchsia-950 dark:text-fuchsia-100">{payload.collaboration.dagMetrics.maxDepth}</p> {/* 展示 DAG 最大深度。 */}
             </div> {/* 结束最大深度指标卡。 */}
             <div className="rounded-lg border border-fuchsia-200/70 bg-fuchsia-50/70 px-2 py-2 dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20"> {/* 定义关键路径指标卡。 */}
-              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">Critical</p> {/* 展示关键路径指标名称。 */}
+              <p className="text-[10px] text-fuchsia-700 dark:text-fuchsia-300">Critical（关键路径）</p> {/* 展示关键路径指标名称。 */}
               <p className="font-mono text-sm font-semibold text-fuchsia-950 dark:text-fuchsia-100">{payload.collaboration.dagMetrics.criticalPathLength}</p> {/* 展示关键路径长度。 */}
             </div> {/* 结束关键路径指标卡。 */}
           </div> {/* 结束第41天 DAG 指标网格。 */}
@@ -203,8 +203,8 @@ export function AgentExplorer() { /* 导出第40天 Supervisor 协作看板组�
               <li key={agent.id} className="rounded-lg border border-fuchsia-200/70 bg-fuchsia-50/60 px-2.5 py-2 text-xs dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20"> {/* 定义单个智能体卡片。 */}
                 <p className="font-semibold text-fuchsia-950 dark:text-fuchsia-100">{agent.name}</p> {/* 展示智能体名称。 */}
                 <p className="mt-0.5 leading-snug text-fuchsia-800/90 dark:text-fuchsia-200/90">{agent.description}</p> {/* 展示智能体职责。 */}
-                <p className="mt-1 break-words font-mono text-[10px] text-fuchsia-700 dark:text-fuchsia-300">capabilities: {agent.capabilities.join(", ")}</p> {/* 展示能力列表。 */}
-                <p className="mt-0.5 break-words font-mono text-[10px] text-fuchsia-700 dark:text-fuchsia-300">tools: {agent.tools.join(", ") || "none"}</p> {/* 展示工具列表。 */}
+                <p className="mt-1 break-words font-mono text-[10px] text-fuchsia-700 dark:text-fuchsia-300">capabilities（能力）: {agent.capabilities.join(", ")}</p> {/* 展示能力列表。 */}
+                <p className="mt-0.5 break-words font-mono text-[10px] text-fuchsia-700 dark:text-fuchsia-300">tools（工具）: {agent.tools.join(", ") || "none"}</p> {/* 展示工具列表。 */}
               </li> /* 结束单个智能体卡片。 */
             ))} {/* 结束智能体遍历。 */}
           </ul> {/* 结束智能体列表。 */}
@@ -212,7 +212,7 @@ export function AgentExplorer() { /* 导出第40天 Supervisor 协作看板组�
           <p className="mt-3 rounded-lg border border-fuchsia-200/70 bg-white/70 px-2 py-2 text-[10px] leading-relaxed text-zinc-600 dark:border-fuchsia-900/40 dark:bg-zinc-950/25 dark:text-zinc-300">{payload.collaboration.result.childResults?.at(-1)?.output ?? payload.demoResult.output}</p> {/* 展示最终 Writer Agent 输出或示例输出。 */}
         </> /* 结束已加载内容片段。 */
       ) : ( /* 未加载完成时展示占位。 */
-        <p className="mt-3 rounded-lg border border-dashed border-zinc-200 px-2 py-3 text-center text-[11px] text-zinc-400 dark:border-zinc-700">Day 41 Agent DAG Runtime 加载中...</p> /* 展示加载占位。 */
+        <p className="mt-3 rounded-lg border border-dashed border-zinc-200 px-2 py-3 text-center text-[11px] text-zinc-400 dark:border-zinc-700">Day 41 Agent DAG Runtime（智能体 DAG 运行时）加载中...</p> /* 展示加载占位。 */
       )} {/* 结束加载状态判断。 */}
     </div> /* 结束 Agent Explorer 容器。 */
   ); /* 结束返回。 */

@@ -42,7 +42,7 @@ export function ChatToolbar({
           onChange={(e) => setUseWorkflow(e.target.checked)}
           disabled={loading}
         />
-        多步 Workflow
+        多步 Workflow（工作流）
       </label>
 
       <div className="hidden h-6 w-px bg-zinc-200 dark:bg-zinc-700 sm:block" aria-hidden />
@@ -81,7 +81,7 @@ export function ChatToolbar({
       <div className="hidden h-6 w-px bg-zinc-200 dark:bg-zinc-700 sm:block" aria-hidden />
 
       <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
-        <span className="whitespace-nowrap text-zinc-500 dark:text-zinc-500">Storage</span>
+        <span className="whitespace-nowrap text-zinc-500 dark:text-zinc-500">Storage（存储）</span>
         <select
           className={selectFieldClass}
           value={storageMode}
@@ -90,8 +90,8 @@ export function ChatToolbar({
           }
           disabled={loading}
         >
-          <option value="local">local</option>
-          <option value="backend">backend</option>
+          <option value="local">local（本地）</option>
+          <option value="backend">backend（后端）</option>
         </select>
       </label>
     </div>
