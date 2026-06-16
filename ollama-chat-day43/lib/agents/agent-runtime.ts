@@ -1,0 +1,387 @@
+import type { AgentCallEdge, AgentCollaborationSnapshot, AgentContext, AgentDAGMetrics, AgentPlan, AgentPlanStep, AgentPlanValidation, AgentResult, AgentTask, AgentTimelineEvent, ReflectionAttempt, ReflectionMetrics, ReflectionResult, Workspace, WorkspaceEntryType } from "@/lib/agents/agent-types"; /* 第43天：引入 DAG、Workspace（工作空间）和 Reflection（反思）运行时需要的类型。 */
+import { AgentRegistry } from "@/lib/agents/agent-registry"; /* 引入智能体注册表用于查找执行目标。 */
+import { invokeChatModel, type ModelRuntime } from "@/lib/model/model-runtime"; /* 引入统一模型调用能力和模型运行时类型。 */
+import { createWorkspace, MemoryWorkspaceStore, type WorkspaceStore } from "@/lib/agents/workspace-store"; /* 第43天：引入共享工作空间创建函数和默认内存存储。 */
+
+type RuntimeMetrics = { /* 定义运行时内部指标结构。 */
+  executedTasks: number; /* 记录已经执行的任务数量。 */
+  delegatedTasks: number; /* 记录已经委派的任务数量。 */
+  totalDuration: number; /* 记录全部任务耗时总和。 */
+  successfulTasks: number; /* 记录成功完成的任务数量。 */
+}; /* 结束 RuntimeMetrics 类型定义。 */
+
+export class AgentRuntime { /* 定义第40天基于 Supervisor 的智能体运行时。 */
+  private readonly callGraph: AgentCallEdge[] = []; /* 保存本次运行产生的智能体调用图。 */
+  private readonly timeline: AgentTimelineEvent[] = []; /* 保存本次运行产生的智能体计划时间线。 */
+  private readonly metrics: RuntimeMetrics = { executedTasks: 0, delegatedTasks: 0, totalDuration: 0, successfulTasks: 0 }; /* 初始化运行时指标。 */
+  private readonly reflectionAttempts: ReflectionAttempt[] = []; /* 第43天：保存所有 Reflection（反思）评审尝试，供前端时间线和指标面板使用。 */
+  private readonly reflectionThreshold = 80; /* 第43天：定义 Reflection（反思）通过阈值，低于该分数会考虑重试。 */
+  private readonly maxReflectionRetries = 2; /* 第43天：定义每个 Agent 最多允许的 Reflection Retry（反思重试）次数。 */
+
+  constructor(private readonly registry: AgentRegistry, private readonly workspaceStore: WorkspaceStore = new MemoryWorkspaceStore()) {} /* 第43天：注入智能体注册表和共享工作空间存储。 */
+
+  async executeAgent(agentId: string, task: AgentTask, context?: AgentContext, rt?: ModelRuntime): Promise<AgentResult> { /* 定义执行单个智能体任务的方法。 */
+    const startedAt = Date.now(); /* 记录任务开始时间戳。 */
+    const assignedTask = { ...task, assignedAgentId: task.assignedAgentId ?? agentId }; /* 确保任务带有被分配的智能体 ID。 */
+    const agent = this.registry.get(agentId); /* 从注册表查找目标智能体。 */
+    this.pushTimeline(agentId, assignedTask.id, `${agentId} started`); /* 记录智能体开始执行事件。 */
+    this.metrics.executedTasks += 1; /* 累加已经执行的任务数量。 */
+    if (!agent) { /* 判断目标智能体是否不存在。 */
+      this.pushTimeline(agentId, assignedTask.id, `${agentId} failed`); /* 记录智能体失败事件。 */
+      return { taskId: assignedTask.id, agentId, output: `未找到 Agent：${agentId}`, metadata: { ok: false } }; /* 返回找不到智能体的结构化结果。 */
+    } /* 结束智能体缺失判断。 */
+    let output = ""; /* 第43天：保存当前轮 Agent 输出，后续可能被重试结果覆盖。 */
+    let finalReflection: ReflectionResult | undefined; /* 第43天：保存最终采用输出对应的 Reflection（反思）结果。 */
+    let attempt = 0; /* 第43天：记录当前 Agent 已经生成了多少轮输出。 */
+    while (attempt <= this.maxReflectionRetries) { /* 第43天：执行生成、反思、必要时重试的闭环。 */
+      attempt += 1; /* 第43天：进入新一轮 Agent 输出尝试。 */
+      const prompt = await this.buildAgentUserPrompt(assignedTask, context, attempt, finalReflection); /* 第43天：构造包含任务、前置结果、Workspace 和上一轮反思建议的提示词。 */
+      output = rt ? await this.invokeAgentModel(agent.systemPrompt, prompt, rt) : this.buildSimulatedOutput(agent.name, assignedTask, agent.capabilities, agent.tools, context, attempt, finalReflection); /* 第43天：有模型时真实生成，无模型时生成可演示反思改进的兜底输出。 */
+      this.pushTimeline("reflection", assignedTask.id, `Reflection Started for ${agentId} attempt ${attempt}`); /* 第43天：记录 Reflection（反思）开始事件。 */
+      finalReflection = await this.reflectResult(assignedTask, output, agentId, rt); /* 第43天：使用 Reflection Agent（反思智能体）评审当前输出质量。 */
+      const shouldRetry = finalReflection.shouldRetry && attempt <= this.maxReflectionRetries; /* 第43天：判断本轮是否需要并且仍然允许重试。 */
+      this.recordReflectionAttempt(agentId, assignedTask.id, attempt, output, finalReflection, shouldRetry); /* 第43天：记录本轮反思评分、问题和是否重试。 */
+      await this.writeReflectionWorkspaceEntry(agentId, assignedTask.id, attempt, finalReflection, context); /* 第43天：把反思结论写入 Workspace（工作空间）。 */
+      this.pushTimeline("reflection", assignedTask.id, shouldRetry ? `Reflection Failed for ${agentId}; retry ${attempt}` : `Reflection Passed for ${agentId}`); /* 第43天：记录反思通过或触发重试的时间线事件。 */
+      if (!shouldRetry) break; /* 第43天：反思通过或达到重试边界时退出闭环。 */
+      this.pushTimeline(agentId, assignedTask.id, `Retry ${agentId} after reflection`); /* 第43天：记录业务 Agent 因反思建议而重试。 */
+    } /* 第43天：结束生成、反思、重试闭环。 */
+    const duration = Math.max(1, Date.now() - startedAt); /* 计算至少 1 毫秒的任务耗时。 */
+    this.metrics.totalDuration += duration; /* 累加任务耗时。 */
+    this.metrics.successfulTasks += 1; /* 累加成功任务数量。 */
+    await this.writeWorkspaceEntry(agentId, assignedTask.id, output, context); /* 第43天：把当前 Agent 的输出沉淀到共享工作空间。 */
+    this.pushTimeline(agentId, assignedTask.id, `${agentId} success`); /* 记录智能体成功事件。 */
+    return { taskId: assignedTask.id, agentId, output, metadata: { ok: true, duration, assignedAgentId: assignedTask.assignedAgentId, reflection: finalReflection } }; /* 第43天：返回带最终 Reflection（反思）结果的结构化执行结果。 */
+  } /* 结束 executeAgent 方法。 */
+
+  async delegateTask(fromAgentId: string, targetAgentId: string, task: AgentTask, context?: AgentContext, rt?: ModelRuntime): Promise<AgentResult> { /* 定义智能体之间的任务委派方法。 */
+    const delegatedTask = { ...task, assignedAgentId: targetAgentId }; /* 将任务标记为分配给目标智能体。 */
+    this.metrics.delegatedTasks += 1; /* 累加委派任务数量。 */
+    this.callGraph.push({ fromAgentId, toAgentId: targetAgentId, taskId: delegatedTask.id }); /* 记录调用图边。 */
+    this.pushTimeline(fromAgentId, delegatedTask.id, `${fromAgentId} delegated to ${targetAgentId}`); /* 记录委派时间线事件。 */
+    return this.executeAgent(targetAgentId, delegatedTask, context, rt); /* 调用目标智能体执行被委派任务。 */
+  } /* 结束 delegateTask 方法。 */
+
+  aggregateResults(rootResult: AgentResult, childResults: AgentResult[]): AgentResult { /* 定义聚合上游与下游结果的方法。 */
+    const outputs = [rootResult.output, ...childResults.map((result) => result.output)]; /* 收集根结果和子结果输出。 */
+    return { ...rootResult, output: outputs.join("\n\n"), childResults }; /* 返回带嵌套子结果的聚合结果。 */
+  } /* 结束 aggregateResults 方法。 */
+
+  async planAgents(goal: string, rt?: ModelRuntime): Promise<AgentPlan> { /* 定义 Supervisor Agent 根据目标生成智能体计划的方法。 */
+    if (!rt) return this.createRuleBasedPlan(goal, "未提供模型运行时，使用规则型 Supervisor 兜底计划。"); /* 没有模型运行时时使用规则计划兜底。 */
+    const supervisor = this.registry.get("supervisor"); /* 从注册表读取 Supervisor Agent。 */
+    const prompt = this.buildSupervisorPrompt(goal); /* 构造包含可用 Agent 列表的 Supervisor 提示词。 */
+    const result = await invokeChatModel(rt, [{ role: "system", content: supervisor?.systemPrompt ?? "你是一个多智能体调度器。" }, { role: "user", content: prompt }]); /* 调用模型生成 AgentPlan。 */
+    if (!result.ok || !result.text.trim()) return this.createRuleBasedPlan(goal, "Supervisor 模型规划失败，使用规则型兜底计划。"); /* 模型失败时使用规则计划兜底。 */
+    const parsed = this.parseAgentPlanFromText(result.text, goal); /* 解析模型返回的 AgentPlan。 */
+    return parsed ?? this.createRuleBasedPlan(goal, "Supervisor 返回内容无法解析为 AgentPlan，使用规则型兜底计划。"); /* 解析失败时使用规则计划兜底。 */
+  } /* 结束 planAgents 方法。 */
+
+  validateAgentPlan(plan: AgentPlan): AgentPlanValidation { /* 定义 AgentPlan 校验器。 */
+    const errors: string[] = []; /* 初始化错误列表。 */
+    const existingAgents = new Set(this.registry.list().map((agent) => agent.id)); /* 收集注册表中存在的智能体 ID。 */
+    const selectedAgents = new Set(plan.selectedAgents); /* 收集计划中选择的智能体 ID。 */
+    plan.selectedAgents.forEach((agentId) => { if (!existingAgents.has(agentId)) errors.push(`selectedAgents 包含不存在的 Agent：${agentId}`); }); /* 校验 selectedAgents 是否存在。 */
+    plan.steps.forEach((step) => { if (!existingAgents.has(step.agentId)) errors.push(`steps 包含不存在的 Agent：${step.agentId}`); }); /* 校验步骤中的智能体是否存在。 */
+    plan.steps.forEach((step) => { if (!step.task.trim()) errors.push(`步骤 ${step.id} 的 task 不能为空`); }); /* 校验步骤任务描述不能为空。 */
+    plan.steps.forEach((step) => { if (!selectedAgents.has(step.agentId)) errors.push(`步骤 ${step.id} 使用了未被 selectedAgents 声明的 Agent：${step.agentId}`); }); /* 校验步骤智能体是否已被选择。 */
+    const stepIds = new Set(plan.steps.map((step) => step.id)); /* 收集所有步骤 ID。 */
+    if (stepIds.size !== plan.steps.length) errors.push("AgentPlan 包含重复的步骤 ID"); /* 校验 DAG 中每个步骤 ID 必须唯一。 */
+    plan.steps.forEach((step) => step.dependsOn?.forEach((dep) => { if (!stepIds.has(dep)) errors.push(`步骤 ${step.id} 依赖不存在的步骤：${dep}`); })); /* 校验 dependsOn 是否合法。 */
+    if (this.hasDependencyCycle(plan.steps)) errors.push("AgentPlan 出现循环依赖"); /* 校验步骤之间是否存在循环依赖。 */
+    this.findOrphanSteps(plan.steps).forEach((stepId) => errors.push(`步骤 ${stepId} 是孤儿节点，既不依赖其他步骤，也不被最终链路使用`)); /* 校验是否存在与整体 DAG 无关的孤儿节点。 */
+    return { ok: errors.length === 0, errors }; /* 返回校验结果。 */
+  } /* 结束 validateAgentPlan 方法。 */
+
+  async executeAgentPlan(plan: AgentPlan, context?: AgentContext, rt?: ModelRuntime): Promise<AgentCollaborationSnapshot> { /* 定义按 AgentPlan DAG 并行执行智能体的方法。 */
+    const validation = this.validateAgentPlan(plan); /* 先校验 Supervisor 产出的计划。 */
+    const safePlan = validation.ok ? plan : this.createFallbackPlan(plan.goal, validation.errors); /* 校验失败时降级为可运行兜底计划。 */
+    const safeValidation = validation.ok ? validation : this.validateAgentPlan(safePlan); /* 为实际执行计划生成校验结果。 */
+    const workspace = context?.workspace ?? createWorkspace(safePlan.goal); /* 第43天：为本次多 Agent 协作创建共享工作空间。 */
+    await this.workspaceStore.create(workspace); /* 第43天：把工作空间写入存储，供后续 Agent 读写。 */
+    const workspaceContext: AgentContext = { memory: context?.memory, workflow: context?.workflow, tools: context?.tools, workspace }; /* 第43天：把共享工作空间注入 AgentContext。 */
+    this.pushTimeline("supervisor", "day43-workspace-plan-task", validation.ok ? "supervisor planned workspace DAG" : "supervisor fallback planned workspace DAG"); /* 第43天：记录 Supervisor 完成带工作空间 DAG 规划事件。 */
+    const resultsByStepId = new Map<string, AgentResult>(); /* 保存每个步骤的执行结果。 */
+    const orderedResults: AgentResult[] = []; /* 保存按执行顺序排列的结果。 */
+    const pendingSteps = new Map(safePlan.steps.map((step) => [step.id, step])); /* 保存尚未执行的 DAG 节点。 */
+    while (pendingSteps.size > 0) { /* 循环寻找当前批次可运行节点，直到所有节点完成。 */
+      const runnableSteps = Array.from(pendingSteps.values()).filter((step) => (step.dependsOn ?? []).every((dep) => resultsByStepId.has(dep))); /* 找出所有依赖已经完成的可运行节点。 */
+      if (runnableSteps.length === 0) break; /* 如果没有可运行节点，说明安全计划仍有异常，退出避免死循环。 */
+      this.pushTimeline("supervisor", `day43-workspace-batch-${orderedResults.length + 1}`, `parallel workspace batch: ${runnableSteps.map((step) => step.id).join(", ")}`); /* 第43天：记录本轮带工作空间的并行批次。 */
+      const batchResults = await Promise.all(runnableSteps.map((step) => this.executeDAGStep(step, resultsByStepId, workspaceContext, rt))); /* 第43天：使用带共享工作空间的上下文并行执行当前批次节点。 */
+      batchResults.forEach(({ step, result }) => { resultsByStepId.set(step.id, result); orderedResults.push(result); pendingSteps.delete(step.id); }); /* 将本批次结果写入 Agent Result Store 并解锁后续节点。 */
+    } /* 结束 DAG 执行循环。 */
+    const finalResults = this.getFinalResults(safePlan.steps, resultsByStepId); /* 收集没有下游依赖的最终节点结果。 */
+    const rootResult = finalResults[0] ?? orderedResults[0] ?? await this.executeAgent("writer", { id: "day43-empty-workspace-fallback", goal: safePlan.goal, assignedAgentId: "writer" }, workspaceContext, rt); /* 第43天：获取最终结果或空 DAG 兜底结果。 */
+    const result = this.aggregateResults(rootResult, finalResults.length ? finalResults.slice(1) : orderedResults.slice(1)); /* 聚合所有最终节点或执行结果。 */
+    await this.summarizeWorkspace(workspace.id); /* 第43天：在协作结束后把工作空间压缩为摘要条目。 */
+    const resultStore = Object.fromEntries(resultsByStepId.entries()); /* 将 Map 结果存储转换为可序列化对象。 */
+    const dagMetrics = this.calculateDAGMetrics(safePlan.steps); /* 第43天：计算 Agent Workspace DAG 指标。 */
+    const finalWorkspace = await this.workspaceStore.get(workspace.id) ?? workspace; /* 第43天：读取包含全部 Agent 写入内容的最终工作空间快照。 */
+    const workspaceMetrics = await this.workspaceStore.getMetrics(workspace.id); /* 第43天：计算共享工作空间指标。 */
+    return { result, callGraph: this.callGraph, timeline: this.timeline, metrics: this.getRuntimeMetrics(), dagMetrics, resultStore, workspace: finalWorkspace, workspaceMetrics, reflectionAttempts: this.reflectionAttempts, reflectionMetrics: this.getReflectionMetrics(), plan: safePlan, validation: safeValidation }; /* 第43天：返回包含 Workspace（工作空间）和 Reflection（反思）指标的 DAG 计划执行快照。 */
+  } /* 结束 executeAgentPlan 方法。 */
+
+  private async executeDAGStep(step: AgentPlanStep, resultsByStepId: Map<string, AgentResult>, context?: AgentContext, rt?: ModelRuntime): Promise<{ step: AgentPlanStep; result: AgentResult }> { /* 定义执行单个 DAG 节点并返回步骤配对结果的方法。 */
+    const parentResults = (step.dependsOn ?? []).map((dep) => resultsByStepId.get(dep)).filter((result): result is AgentResult => Boolean(result)); /* 按 dependsOn 收集当前节点所有父级结果。 */
+    const fromAgentId = parentResults.at(-1)?.agentId ?? "supervisor"; /* 使用最后一个父级 Agent 或 Supervisor 作为主要委派来源。 */
+    parentResults.slice(0, -1).forEach((result) => this.callGraph.push({ fromAgentId: result.agentId, toAgentId: step.agentId, taskId: step.id })); /* 为多个父节点补充调用图边。 */
+    const task: AgentTask = { id: step.id, goal: step.task, parentTaskId: parentResults.at(-1)?.taskId, context: { previousResults: parentResults, parentResults } }; /* 创建包含 previousResults 和 parentResults 的 DAG 上下文。 */
+    const workspace = context?.workspace ? await this.refreshWorkspace(context.workspace) : undefined; /* 第43天：执行节点前刷新共享工作空间，让下游 Agent 读取最新条目。 */
+    const nextContext = context && workspace ? { ...context, workspace } : context; /* 第43天：把刷新后的工作空间重新注入当前节点上下文。 */
+    const result = await this.delegateTask(fromAgentId, step.agentId, task, nextContext, rt); /* 第43天：通过带工作空间的委派入口执行当前 DAG 节点。 */
+    return { step, result }; /* 返回步骤和执行结果，便于外层写入 Result Store。 */
+  } /* 结束 executeDAGStep 方法。 */
+
+  private getFinalResults(steps: AgentPlanStep[], resultsByStepId: Map<string, AgentResult>): AgentResult[] { /* 定义收集 DAG 出口节点结果的方法。 */
+    const dependedIds = new Set(steps.flatMap((step) => step.dependsOn ?? [])); /* 收集所有被其他节点依赖的步骤 ID。 */
+    return steps.filter((step) => !dependedIds.has(step.id)).map((step) => resultsByStepId.get(step.id)).filter((result): result is AgentResult => Boolean(result)); /* 返回没有下游依赖的最终节点结果。 */
+  } /* 结束 getFinalResults 方法。 */
+
+  async runSupervisorCollaboration(goal: string, context?: AgentContext, rt?: ModelRuntime): Promise<AgentCollaborationSnapshot> { /* 定义第40天 Supervisor 协作入口。 */
+    const plan = await this.planAgents(goal, rt); /* 由 Supervisor 生成智能体计划。 */
+    return this.executeAgentPlan(plan, context, rt); /* 执行并返回计划协作快照。 */
+  } /* 结束 runSupervisorCollaboration 方法。 */
+
+  async runFixedCollaboration(goal: string, context?: AgentContext, rt?: ModelRuntime): Promise<AgentCollaborationSnapshot> { /* 定义兼容 Day39 的固定链路入口。 */
+    const plan: AgentPlan = { goal, selectedAgents: ["research", "planner", "critic", "writer"], reason: "兼容 Day39 固定协作链。", steps: this.buildPlanSteps(goal, ["research", "planner", "critic", "writer"]) }; /* 构建固定链路计划。 */
+    return this.executeAgentPlan(plan, context, rt); /* 复用第40天计划执行器。 */
+  } /* 结束 runFixedCollaboration 方法。 */
+
+  getRuntimeMetrics(): AgentCollaborationSnapshot["metrics"] { /* 定义读取运行时指标的方法。 */
+    const avgTaskDuration = this.metrics.executedTasks ? Number((this.metrics.totalDuration / this.metrics.executedTasks).toFixed(2)) : 0; /* 计算平均任务耗时。 */
+    const successRate = this.metrics.executedTasks ? Number((this.metrics.successfulTasks / this.metrics.executedTasks).toFixed(2)) : 0; /* 计算任务成功率。 */
+    return { executedTasks: this.metrics.executedTasks, delegatedTasks: this.metrics.delegatedTasks, avgTaskDuration, successRate }; /* 返回运行时指标快照。 */
+  } /* 结束 getRuntimeMetrics 方法。 */
+
+  private buildSupervisorPrompt(goal: string): string { /* 定义 Supervisor 模型规划提示词生成方法。 */
+    const agents = this.registry.list().filter((agent) => agent.id !== "supervisor"); /* 读取除 Supervisor 外的可调度业务智能体。 */
+    const agentList = agents.map((agent) => `- ${agent.id}: ${agent.description}\n  capabilities: ${agent.capabilities.join(", ")}`).join("\n"); /* 将可用 Agent 列表格式化进提示词。 */
+    return `可用 Agent：\n${agentList}\n\n请根据用户目标选择必要 Agent，并生成第43天 Agent Workspace DAG Plan。\n要求：\n1. 只选择必要 Agent，不要所有任务都用全量 Agent。\n2. selectedAgents 和 steps.agentId 只能使用上方 Agent id。\n3. steps 表示 DAG 节点，不要求线性串行，但每个节点必须有稳定 id。\n4. 可以并行的步骤必须写相同的上游 dependsOn，例如 concept 和 roadmap 同时依赖 research。\n5. dependsOn 只能引用已经存在的 step.id，不能出现循环依赖，不能出现无意义孤儿节点。\n6. 最终 writer 节点应依赖所有需要汇总的上游结果，并把最终内容沉淀到 Shared Workspace。\n7. 只返回 JSON，不要 Markdown。\n\nJSON 格式：\n{\n  "goal": "...",\n  "selectedAgents": ["..."],\n  "reason": "...",\n  "steps": [\n    { "id": "research", "agentId": "research", "task": "...", "dependsOn": [] },\n    { "id": "concept", "agentId": "writer", "task": "...", "dependsOn": ["research"] },\n    { "id": "roadmap", "agentId": "planner", "task": "...", "dependsOn": ["research"] },\n    { "id": "writer", "agentId": "writer", "task": "...", "dependsOn": ["concept", "roadmap"] }\n  ]\n}\n\n用户目标：${goal}`; /* 第43天：返回完整 Supervisor Workspace DAG 提示词。 */
+  } /* 结束 buildSupervisorPrompt 方法。 */
+
+  private parseAgentPlanFromText(text: string, goal: string): AgentPlan | null { /* 定义从模型文本中解析 AgentPlan 的方法。 */
+    const jsonText = text.match(/\{[\s\S]*\}/)?.[0] ?? text; /* 优先提取首个 JSON 对象文本。 */
+    try { /* 捕获 JSON 解析错误。 */
+      const parsed = JSON.parse(jsonText) as Partial<AgentPlan>; /* 将文本解析为宽松 AgentPlan。 */
+      if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) return null; /* 没有步骤时视为无效计划。 */
+      const steps = parsed.steps.map((step, index) => this.normalizePlanStep(step as Partial<AgentPlanStep>, index)); /* 标准化每个计划步骤。 */
+      const selectedAgents = Array.isArray(parsed.selectedAgents) ? parsed.selectedAgents.filter((agentId): agentId is string => typeof agentId === "string") : Array.from(new Set(steps.map((step) => step.agentId))); /* 标准化 selectedAgents。 */
+      return { goal: typeof parsed.goal === "string" && parsed.goal.trim() ? parsed.goal.trim() : goal, selectedAgents, reason: typeof parsed.reason === "string" ? parsed.reason : "Supervisor 根据用户目标生成计划。", steps }; /* 返回标准 AgentPlan。 */
+    } catch { /* 处理 JSON 解析失败。 */
+      return null; /* 解析失败时返回 null。 */
+    } /* 结束 catch。 */
+  } /* 结束 parseAgentPlanFromText 方法。 */
+
+  private normalizePlanStep(step: Partial<AgentPlanStep>, index: number): AgentPlanStep { /* 定义计划步骤标准化方法。 */
+    const fallbackId = `day43-step-${index + 1}-${typeof step.agentId === "string" ? step.agentId : "agent"}`; /* 第43天：生成缺省步骤 ID。 */
+    return { id: typeof step.id === "string" && step.id.trim() ? step.id.trim() : fallbackId, agentId: typeof step.agentId === "string" ? step.agentId.trim() : "", task: typeof step.task === "string" ? step.task.trim() : "", dependsOn: Array.isArray(step.dependsOn) ? step.dependsOn.filter((dep): dep is string => typeof dep === "string") : [] }; /* 返回标准化后的步骤。 */
+  } /* 结束 normalizePlanStep 方法。 */
+
+  private createRuleBasedPlan(goal: string, reasonPrefix: string): AgentPlan { /* 定义规则型 Supervisor 兜底计划。 */
+    const normalizedGoal = goal.toLowerCase(); /* 将目标转成小写用于规则匹配。 */
+    const hasResearchIntent = /研究|学习|资料|检索|搜索|rag|langgraph|报告/i.test(normalizedGoal); /* 判断是否需要研究智能体。 */
+    const hasPlanIntent = /计划|规划|路线|三天|workflow|拆解|学习/i.test(normalizedGoal); /* 判断是否需要规划智能体。 */
+    const hasCriticIntent = /检查|审查|漏洞|风险|问题|评审|报告/i.test(normalizedGoal); /* 判断是否需要审查智能体。 */
+    const writerOnlyIntent = /总结|润色|改写|输出|表达|文字/i.test(normalizedGoal) && !hasResearchIntent && !hasPlanIntent && !hasCriticIntent; /* 判断是否属于仅写作任务。 */
+    const selectedAgents = writerOnlyIntent ? ["writer"] : [...(hasResearchIntent ? ["research"] : []), ...(hasPlanIntent ? ["planner"] : []), ...(hasCriticIntent ? ["critic"] : []), "writer"]; /* 生成必要智能体列表并默认保留最终写作。 */
+    const uniqueAgents = Array.from(new Set(selectedAgents)); /* 对智能体列表去重并保持顺序。 */
+    const steps = this.buildPlanSteps(goal, uniqueAgents); /* 根据已选智能体构建执行步骤。 */
+    return { goal, selectedAgents: uniqueAgents, reason: `${reasonPrefix}${this.describeSupervisorReason(uniqueAgents)}`, steps }; /* 返回规则型 Supervisor 决策计划。 */
+  } /* 结束 createRuleBasedPlan 方法。 */
+
+  private buildPlanSteps(goal: string, selectedAgents: string[]): AgentPlanStep[] { /* 定义根据智能体列表生成计划步骤的方法。 */
+    if (selectedAgents.includes("research") && selectedAgents.includes("planner") && selectedAgents.includes("writer")) { /* 判断是否适合生成 Research 后并行 Concept 与 Roadmap 的 DAG。 */
+      const conceptNeeded = selectedAgents.includes("critic"); /* 判断是否需要额外审查分支参与并行。 */
+      return [{ id: "research", agentId: "research", task: this.buildTaskForAgent("research", goal), dependsOn: [] }, { id: "concept", agentId: "writer", task: `总结核心概念并形成可汇总材料：${goal}`, dependsOn: ["research"] }, { id: "roadmap", agentId: "planner", task: this.buildTaskForAgent("planner", goal), dependsOn: ["research"] }, ...(conceptNeeded ? [{ id: "critic", agentId: "critic", task: this.buildTaskForAgent("critic", goal), dependsOn: ["research"] }] : []), { id: "writer", agentId: "writer", task: this.buildTaskForAgent("writer", goal), dependsOn: conceptNeeded ? ["concept", "roadmap", "critic"] : ["concept", "roadmap"] }]; /* 返回带并行分支和最终汇总节点的 DAG 步骤。 */
+    } /* 结束 DAG 兜底计划分支。 */
+    return selectedAgents.map((agentId, index) => ({ id: `day43-step-${index + 1}-${agentId}`, agentId, task: this.buildTaskForAgent(agentId, goal), dependsOn: index === 0 ? [] : [`day43-step-${index}-${selectedAgents[index - 1]}`] })); /* 第43天：对简单任务保留可执行的线性 Workspace DAG。 */
+  } /* 结束 buildPlanSteps 方法。 */
+
+  private buildTaskForAgent(agentId: string, goal: string): string { /* 定义为不同智能体生成任务文案的方法。 */
+    if (agentId === "research") return `围绕用户目标收集和整理资料：${goal}`; /* 返回研究任务。 */
+    if (agentId === "planner") return `基于已有信息制定可执行计划：${goal}`; /* 返回规划任务。 */
+    if (agentId === "critic") return `审查当前方案的漏洞、风险和遗漏：${goal}`; /* 返回审查任务。 */
+    return `整合前置结果并生成面向用户的最终输出：${goal}`; /* 返回写作任务。 */
+  } /* 结束 buildTaskForAgent 方法。 */
+
+  private describeSupervisorReason(selectedAgents: string[]): string { /* 定义 Supervisor 决策原因生成方法。 */
+    const labels: Record<string, string> = { research: "需要资料检索或背景整理", planner: "需要步骤拆解或学习计划", critic: "需要风险审查或质量检查", writer: "需要最终总结和表达输出" }; /* 定义智能体原因映射。 */
+    return selectedAgents.map((agentId) => labels[agentId] ?? `${agentId} 参与调度`).join("；"); /* 返回可读的调度原因。 */
+  } /* 结束 describeSupervisorReason 方法。 */
+
+  private createFallbackPlan(goal: string, errors: string[]): AgentPlan { /* 定义计划校验失败时的兜底计划。 */
+    return { goal, selectedAgents: ["writer"], reason: `原计划校验失败，降级为 Writer Agent 兜底输出：${errors.join("；")}`, steps: [{ id: "day43-fallback-writer", agentId: "writer", task: `整理用户目标并输出可读结果：${goal}`, dependsOn: [] }] }; /* 第43天：返回 Writer 兜底计划。 */
+  } /* 结束 createFallbackPlan 方法。 */
+
+  private hasDependencyCycle(steps: AgentPlanStep[]): boolean { /* 定义检测步骤循环依赖的方法。 */
+    const graph = new Map(steps.map((step) => [step.id, step.dependsOn ?? []])); /* 将步骤依赖转换为图结构。 */
+    const visiting = new Set<string>(); /* 保存当前递归栈中的步骤。 */
+    const visited = new Set<string>(); /* 保存已经完成检查的步骤。 */
+    const visit = (id: string): boolean => { /* 定义深度优先搜索函数。 */
+      if (visiting.has(id)) return true; /* 再次遇到递归栈节点说明有环。 */
+      if (visited.has(id)) return false; /* 已检查节点不重复处理。 */
+      visiting.add(id); /* 将当前节点加入递归栈。 */
+      const hasCycle = (graph.get(id) ?? []).some(visit); /* 递归检查依赖节点。 */
+      visiting.delete(id); /* 当前节点检查结束后移出递归栈。 */
+      visited.add(id); /* 标记当前节点已经检查。 */
+      return hasCycle; /* 返回是否发现循环依赖。 */
+    }; /* 结束 visit 函数定义。 */
+    return steps.some((step) => visit(step.id)); /* 检查任意步骤是否存在循环依赖。 */
+  } /* 结束 hasDependencyCycle 方法。 */
+
+  private findOrphanSteps(steps: AgentPlanStep[]): string[] { /* 第43天：定义孤儿节点检测方法。 */
+    if (steps.length <= 1) return []; /* 单节点计划天然不是孤儿 DAG。 */
+    const dependedIds = new Set(steps.flatMap((step) => step.dependsOn ?? [])); /* 收集所有被下游节点依赖的步骤 ID。 */
+    return steps.filter((step) => (step.dependsOn ?? []).length === 0 && !dependedIds.has(step.id)).map((step) => step.id); /* 返回既无入边也无出边的孤立步骤。 */
+  } /* 结束 findOrphanSteps 方法。 */
+
+  private calculateDAGMetrics(steps: AgentPlanStep[]): AgentDAGMetrics { /* 第43天：定义 Workspace DAG 指标计算方法。 */
+    const depthMemo = new Map<string, number>(); /* 保存每个节点深度，避免重复计算。 */
+    const stepMap = new Map(steps.map((step) => [step.id, step])); /* 将步骤列表转换为按 ID 查找的 Map。 */
+    const depthOf = (stepId: string): number => { /* 定义递归计算节点深度的函数。 */
+      if (depthMemo.has(stepId)) return depthMemo.get(stepId) ?? 1; /* 命中缓存时直接返回深度。 */
+      const step = stepMap.get(stepId); /* 读取当前步骤。 */
+      const parentDepths = (step?.dependsOn ?? []).map(depthOf); /* 递归计算所有父节点深度。 */
+      const depth = parentDepths.length ? Math.max(...parentDepths) + 1 : 1; /* 没有父节点时深度为 1，否则为父节点最大深度加 1。 */
+      depthMemo.set(stepId, depth); /* 缓存当前节点深度。 */
+      return depth; /* 返回当前节点深度。 */
+    }; /* 结束 depthOf 函数定义。 */
+    const depths = steps.map((step) => depthOf(step.id)); /* 计算所有节点深度。 */
+    const widthByDepth = depths.reduce<Record<number, number>>((acc, depth) => ({ ...acc, [depth]: (acc[depth] ?? 0) + 1 }), {}); /* 统计每一层包含多少节点。 */
+    const parallelSteps = steps.filter((step) => (widthByDepth[depthOf(step.id)] ?? 0) > 1).length; /* 统计处在多节点层级中的可并行步骤数量。 */
+    const maxDepth = depths.length ? Math.max(...depths) : 0; /* 计算 DAG 最大深度。 */
+    return { totalSteps: steps.length, parallelSteps, maxDepth, criticalPathLength: maxDepth }; /* 返回 DAG 指标快照。 */
+  } /* 结束 calculateDAGMetrics 方法。 */
+
+  private async buildAgentUserPrompt(task: AgentTask, context?: AgentContext, attempt = 1, previousReflection?: ReflectionResult): Promise<string> { /* 第43天：定义包含 Reflection（反思）建议的 Agent 用户提示词生成方法。 */
+    const previousResults = this.extractPreviousResults(task.context); /* 提取前置 Agent 输出。 */
+    const previousText = previousResults.length ? previousResults.map((result) => `【${result.agentId} / ${result.taskId}】\n${result.output}`).join("\n\n") : "无"; /* 格式化前置结果文本。 */
+    const workspaceEntries = context?.workspace ? await this.workspaceStore.listEntries(context.workspace.id) : []; /* 第43天：读取共享工作空间已有条目。 */
+    const workspaceText = workspaceEntries.length ? workspaceEntries.map((entry) => `[${entry.type}] ${entry.agentId}: ${entry.content}`).join("\n\n") : "无"; /* 第43天：格式化共享工作空间条目文本。 */
+    const reflectionText = previousReflection ? `上一轮 Reflection（反思）评分：${previousReflection.score}；问题：${previousReflection.issues.join("；") || "无"}；建议：${previousReflection.suggestions.join("；") || "无"}` : "当前是首次生成，暂无上一轮反思建议。"; /* 第43天：格式化上一轮反思建议，供重试时定向修正。 */
+    return `当前任务：\n${task.goal}\n\n前置 Agent 输出：\n${previousText}\n\n共享工作空间：\n${workspaceText}\n\nReflection Context（反思上下文）：\n第 ${attempt} 轮生成；${reflectionText}\n\n请只完成当前 Agent 职责范围内的工作；如果这是重试，请优先修正 Reflection 指出的问题。`; /* 第43天：返回包含 Workspace（工作空间）和 Reflection（反思）建议的 Agent 执行提示词。 */
+  } /* 结束 buildAgentUserPrompt 方法。 */
+
+  private extractPreviousResults(taskContext?: unknown): AgentResult[] { /* 定义从任务上下文提取前置结果的方法。 */
+    if (!taskContext || typeof taskContext !== "object") return []; /* 上下文为空或非对象时返回空数组。 */
+    const parentResults = (taskContext as { parentResults?: unknown }).parentResults; /* 第43天：读取 DAG parentResults 字段并配合 Workspace 使用。 */
+    if (Array.isArray(parentResults)) return parentResults.filter((item): item is AgentResult => Boolean(item) && typeof item === "object" && typeof (item as AgentResult).output === "string"); /* 优先返回合法父级依赖结果数组。 */
+    const previousResults = (taskContext as { previousResults?: unknown }).previousResults; /* 读取 previousResults 字段。 */
+    return Array.isArray(previousResults) ? previousResults.filter((item): item is AgentResult => Boolean(item) && typeof item === "object" && typeof (item as AgentResult).output === "string") : []; /* 返回合法前置结果数组。 */
+  } /* 结束 extractPreviousResults 方法。 */
+
+  private async invokeAgentModel(systemPrompt: string, userPrompt: string, rt: ModelRuntime): Promise<string> { /* 定义单个 Agent 真实模型调用方法。 */
+    const result = await invokeChatModel(rt, [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }]); /* 使用 Agent systemPrompt 和任务上下文调用模型。 */
+    return result.ok && result.text.trim() ? result.text.trim() : "模型暂时不可用，当前 Agent 未获得有效输出。"; /* 返回模型输出或失败兜底文本。 */
+  } /* 结束 invokeAgentModel 方法。 */
+
+  private buildSimulatedOutput(agentName: string, task: AgentTask, capabilities: string[], tools: string[], context?: AgentContext, attempt = 1, previousReflection?: ReflectionResult): string { /* 第43天：定义无模型运行时时可演示 Reflection 改进的输出方法。 */
+    const contextText = this.describeContext(context, task.context); /* 生成上下文状态描述。 */
+    const retryText = previousReflection ? `本轮根据反思建议补充：${previousReflection.suggestions.join("；") || "保持结构清晰"}。` : ""; /* 第43天：生成重试时展示的反思修正说明。 */
+    const coverageText = attempt === 1 ? "初稿只给出简短结论和少量上下文，还没有展开关键概念、边界条件和下一步行动。" : "修正版补充完整性、准确性、逻辑性、覆盖度、关键概念、风险和下一步行动。"; /* 第43天：让模拟输出在重试后明显变好，便于测试反思指标。 */
+    return `${agentName} 已处理任务 ${task.id}：${task.goal}。${coverageText}${retryText}能力：${capabilities.join(", ")}。工具：${tools.join(", ") || "无"}。上下文：${contextText}。`; /* 第43天：返回带尝试轮次差异的演示输出文本。 */
+  } /* 结束 buildSimulatedOutput 方法。 */
+
+  private describeContext(context?: AgentContext, taskContext?: unknown): string { /* 定义上下文说明生成方法。 */
+    const memoryReady = context?.memory ? "已接收记忆上下文" : "暂无记忆上下文"; /* 生成记忆上下文状态。 */
+    const workflowReady = context?.workflow ? "已接收工作流上下文" : "暂无工作流上下文"; /* 生成工作流上下文状态。 */
+    const toolsReady = context?.tools ? "已接收工具上下文" : "暂无工具上下文"; /* 生成工具上下文状态。 */
+    const taskReady = taskContext ? "已接收 previousResults 前置结果" : "暂无前置结果"; /* 生成任务上下文状态。 */
+    const workspaceReady = context?.workspace ? `已接收共享工作空间 ${context.workspace.id}` : "暂无共享工作空间"; /* 第43天：生成共享工作空间上下文状态。 */
+    return `${memoryReady}，${workflowReady}，${toolsReady}，${taskReady}，${workspaceReady}`; /* 第43天：返回合并后的上下文说明。 */
+  } /* 结束 describeContext 方法。 */
+
+  private async reflectResult(task: AgentTask, output: string, agentId: string, rt?: ModelRuntime): Promise<ReflectionResult> { /* 第43天：定义 Reflection（反思）评审入口，根据任务和输出生成质量判断。 */
+    const reflectionAgent = this.registry.get("reflection"); /* 第43天：从注册表读取 Reflection Agent（反思智能体）。 */
+    if (!rt || !reflectionAgent) return this.createRuleBasedReflection(task, output); /* 第43天：没有模型或没有反思智能体时使用规则型兜底评审。 */
+    const prompt = this.buildReflectionPrompt(task, output, agentId); /* 第43天：构造要求模型返回结构化 JSON 的反思提示词。 */
+    const result = await invokeChatModel(rt, [{ role: "system", content: reflectionAgent.systemPrompt }, { role: "user", content: prompt }]); /* 第43天：调用 Reflection Agent（反思智能体）审查业务 Agent 输出。 */
+    const parsed = result.ok ? this.parseReflectionFromText(result.text) : null; /* 第43天：尝试解析模型返回的 ReflectionResult（反思结果）。 */
+    return parsed ?? this.createRuleBasedReflection(task, output); /* 第43天：解析失败时回退到规则型反思，保证运行时稳定。 */
+  } /* 第43天：结束 reflectResult（反思结果）方法。 */
+
+  private buildReflectionPrompt(task: AgentTask, output: string, agentId: string): string { /* 第43天：定义 Reflection Prompt（反思提示词）生成方法。 */
+    return `请审查 ${agentId} 针对任务的输出质量。\n\n任务：\n${task.goal}\n\n输出：\n${output}\n\n请从 Completeness（完整性）、Accuracy（准确性）、Logic（逻辑性）、Coverage（覆盖度）评分，并只返回 JSON：{"score":number,"issues":string[],"suggestions":string[],"shouldRetry":boolean}。低于 ${this.reflectionThreshold} 分时 shouldRetry 为 true。`; /* 第43天：返回严格 JSON 格式的反思提示词。 */
+  } /* 第43天：结束 buildReflectionPrompt（反思提示词）方法。 */
+
+  private parseReflectionFromText(text: string): ReflectionResult | null { /* 第43天：定义从模型文本中解析 ReflectionResult（反思结果）的方法。 */
+    const jsonText = text.match(/\{[\s\S]*\}/)?.[0]; /* 第43天：提取文本中的 JSON 对象片段。 */
+    if (!jsonText) return null; /* 第43天：没有 JSON 片段时返回空值。 */
+    try { /* 第43天：捕获 JSON 解析异常，避免模型格式漂移导致运行失败。 */
+      const parsed = JSON.parse(jsonText) as Partial<ReflectionResult>; /* 第43天：解析模型返回的 JSON 内容。 */
+      const score = typeof parsed.score === "number" ? Math.max(0, Math.min(100, parsed.score)) : 0; /* 第43天：把评分限制在 0 到 100 之间。 */
+      const issues = Array.isArray(parsed.issues) ? parsed.issues.filter((item): item is string => typeof item === "string") : []; /* 第43天：规范化问题列表。 */
+      const suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions.filter((item): item is string => typeof item === "string") : []; /* 第43天：规范化建议列表。 */
+      const shouldRetry = typeof parsed.shouldRetry === "boolean" ? parsed.shouldRetry : score < this.reflectionThreshold; /* 第43天：优先使用模型判断，否则根据阈值推导。 */
+      return { score, issues, suggestions, shouldRetry }; /* 第43天：返回规范化后的 ReflectionResult（反思结果）。 */
+    } catch { /* 第43天：处理 JSON 解析失败。 */
+      return null; /* 第43天：解析失败时交给上层使用规则兜底。 */
+    } /* 第43天：结束异常处理。 */
+  } /* 第43天：结束 parseReflectionFromText 方法。 */
+
+  private createRuleBasedReflection(task: AgentTask, output: string): ReflectionResult { /* 第43天：定义规则型 Reflection（反思）兜底评审。 */
+    const issues: string[] = []; /* 第43天：初始化问题列表。 */
+    const suggestions: string[] = []; /* 第43天：初始化改进建议列表。 */
+    if (output.includes("初稿只给出")) { issues.push("当前只是初稿，缺少充分展开。"); suggestions.push("根据反思要求补充关键概念、检查维度和下一步行动。"); } /* 第43天：让无模型演示初稿稳定触发一次反思重试。 */
+    if (output.length < 160) { issues.push("输出过短，可能没有覆盖任务目标。"); suggestions.push("补充背景、关键结论和可执行步骤。"); } /* 第43天：检查输出长度是否过短。 */
+    if (!/完整性|准确性|逻辑性|覆盖度|风险|下一步|Checkpoint|检查点|StateGraph|Conditional Edge/i.test(output)) { issues.push("缺少关键检查维度或领域关键词。"); suggestions.push("补充完整性、准确性、逻辑性、覆盖度以及关键概念说明。"); } /* 第43天：检查是否包含反思要求关注的核心维度。 */
+    if (!output.includes(task.goal.slice(0, Math.min(12, task.goal.length)))) { issues.push("输出和原始任务目标的显式关联不足。"); suggestions.push("在回答中重新点明任务目标并对齐结论。"); } /* 第43天：检查输出是否明显回应当前任务。 */
+    const penalty = issues.length * 18; /* 第43天：根据问题数量计算扣分。 */
+    const score = Math.max(55, Math.min(96, 92 - penalty + Math.min(12, Math.floor(output.length / 120)))); /* 第43天：生成稳定可解释的规则评分。 */
+    const shouldRetry = score < this.reflectionThreshold; /* 第43天：根据阈值判断是否应该重试。 */
+    return { score, issues, suggestions, shouldRetry }; /* 第43天：返回规则型 ReflectionResult（反思结果）。 */
+  } /* 第43天：结束 createRuleBasedReflection 方法。 */
+
+  private recordReflectionAttempt(agentId: string, taskId: string, attempt: number, output: string, reflection: ReflectionResult, retried: boolean): void { /* 第43天：记录一次完整的反思尝试。 */
+    this.reflectionAttempts.push({ attempt, agentId, taskId, output, reflection, retried, createdAt: Date.now() }); /* 第43天：把反思尝试写入内存快照。 */
+  } /* 第43天：结束 recordReflectionAttempt 方法。 */
+
+  private async writeReflectionWorkspaceEntry(agentId: string, taskId: string, attempt: number, reflection: ReflectionResult, context?: AgentContext): Promise<void> { /* 第43天：把 Reflection（反思）结果写入 Workspace（工作空间）。 */
+    if (!context?.workspace) return; /* 第43天：没有工作空间时保持兼容旧调用。 */
+    const content = `Reflection（反思）评审 ${agentId}/${taskId} 第 ${attempt} 轮：score=${reflection.score}；shouldRetry=${reflection.shouldRetry}；issues=${reflection.issues.join("；") || "无"}；suggestions=${reflection.suggestions.join("；") || "无"}`; /* 第43天：生成可读的反思记录正文。 */
+    await this.workspaceStore.addEntry(context.workspace.id, { id: `${taskId}-${agentId}-reflection-${attempt}-${Date.now()}`, type: "decision", agentId: "reflection", content, tags: ["reflection", agentId, taskId, `attempt-${attempt}`], createdAt: Date.now() }); /* 第43天：把反思结论作为 decision（决策）条目写入工作空间。 */
+  } /* 第43天：结束 writeReflectionWorkspaceEntry 方法。 */
+
+  private getReflectionMetrics(): ReflectionMetrics { /* 第43天：计算 Reflection Metrics（反思指标）。 */
+    if (this.reflectionAttempts.length === 0) return { averageScore: 0, retryCount: 0, passRate: 0, improvementRate: 0 }; /* 第43天：没有反思记录时返回空指标。 */
+    const scores = this.reflectionAttempts.map((item) => item.reflection.score); /* 第43天：收集所有反思评分。 */
+    const averageScore = Number((scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(2)); /* 第43天：计算平均反思评分。 */
+    const retryCount = this.reflectionAttempts.filter((item) => item.retried).length; /* 第43天：统计触发重试的次数。 */
+    const passRate = Number((this.reflectionAttempts.filter((item) => item.reflection.score >= this.reflectionThreshold).length / this.reflectionAttempts.length).toFixed(2)); /* 第43天：计算通过率。 */
+    const firstScores = new Map<string, number>(); /* 第43天：保存每个任务的首次评分。 */
+    const improvements: number[] = []; /* 第43天：保存每个重试任务的最终提升幅度。 */
+    this.reflectionAttempts.forEach((item) => { const key = `${item.agentId}:${item.taskId}`; if (!firstScores.has(key)) firstScores.set(key, item.reflection.score); else improvements.push(item.reflection.score - (firstScores.get(key) ?? item.reflection.score)); }); /* 第43天：对比同一任务后续评分和首次评分。 */
+    const improvementRate = improvements.length ? Number((improvements.reduce((sum, value) => sum + value, 0) / improvements.length).toFixed(2)) : 0; /* 第43天：计算平均改进幅度。 */
+    return { averageScore, retryCount, passRate, improvementRate }; /* 第43天：返回 Reflection Metrics（反思指标）。 */
+  } /* 第43天：结束 getReflectionMetrics 方法。 */
+
+  private async refreshWorkspace(workspace: Workspace): Promise<Workspace> { /* 第43天：定义刷新共享工作空间快照的方法。 */
+    return await this.workspaceStore.get(workspace.id) ?? workspace; /* 第43天：优先返回存储中的最新工作空间。 */
+  } /* 第43天：结束 refreshWorkspace 方法。 */
+
+  private async writeWorkspaceEntry(agentId: string, taskId: string, output: string, context?: AgentContext): Promise<void> { /* 第43天：定义 Agent 写入共享工作空间的方法。 */
+    if (!context?.workspace) return; /* 第43天：没有工作空间时保持兼容旧调用。 */
+    await this.workspaceStore.addEntry(context.workspace.id, { id: `${taskId}-${agentId}-${Date.now()}`, type: this.getWorkspaceEntryType(agentId, taskId), agentId, content: output, tags: [agentId, taskId], createdAt: Date.now() }); /* 第43天：把 Agent 输出保存为工作空间条目。 */
+  } /* 第43天：结束 writeWorkspaceEntry 方法。 */
+
+  private getWorkspaceEntryType(agentId: string, taskId: string): WorkspaceEntryType { /* 第43天：定义 Agent 到工作空间条目类型的映射。 */
+    if (agentId === "research") return "finding"; /* 第43天：Research Agent 输出记录为研究发现。 */
+    if (agentId === "planner") return "draft"; /* 第43天：Planner Agent 输出记录为草稿。 */
+    if (agentId === "critic") return taskId.includes("question") ? "question" : "decision"; /* 第43天：Critic Agent 输出记录为决策或问题。 */
+    if (agentId === "writer") return "final"; /* 第43天：Writer Agent 输出记录为最终结果。 */
+    return "note"; /* 第43天：其他 Agent 输出记录为普通笔记。 */
+  } /* 第43天：结束 getWorkspaceEntryType 方法。 */
+
+  private async summarizeWorkspace(workspaceId: string): Promise<void> { /* 第43天：定义共享工作空间摘要器。 */
+    const entries = await this.workspaceStore.listEntries(workspaceId); /* 第43天：读取当前工作空间全部条目。 */
+    if (entries.length === 0) return; /* 第43天：没有条目时不生成摘要。 */
+    const byType = entries.reduce<Record<string, number>>((acc, entry) => ({ ...acc, [entry.type]: (acc[entry.type] ?? 0) + 1 }), {}); /* 第43天：统计摘要需要的条目类型分布。 */
+    const summary = `Workspace Summary（工作空间摘要）：共 ${entries.length} 条记录；类型分布 ${Object.entries(byType).map(([type, count]) => `${type}:${count}`).join("，")}；最终协作目标已沉淀到共享工作空间。`; /* 第43天：生成短摘要文本，避免后续 prompt 过长。 */
+    await this.workspaceStore.addEntry(workspaceId, { id: `workspace-summary-${Date.now()}`, type: "note", agentId: "workspace-summarizer", content: summary, tags: ["workspace", "summary"], createdAt: Date.now() }); /* 第43天：把摘要作为 note 条目写回工作空间。 */
+  } /* 第43天：结束 summarizeWorkspace 方法。 */
+
+  private pushTimeline(agentId: string, taskId: string, label: string): void { /* 定义追加时间线事件的方法。 */
+    this.timeline.push({ id: `${this.timeline.length + 1}-${agentId}-${taskId}`, agentId, taskId, label, timestamp: new Date().toISOString() }); /* 写入一个新的时间线事件。 */
+  } /* 结束 pushTimeline 方法。 */
+} /* 结束 AgentRuntime 类定义。 */

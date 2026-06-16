@@ -1,0 +1,13 @@
+
+> ollama-chat-day43@0.1.0 dev
+> next dev --port 3000
+
+▲ Next.js 16.2.4 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.84.116:3000
+- Environments: .env.local
+✓ Ready in 4.7s
+
+ GET /api/agents 200 in 879ms (next.js: 829ms, application-code: 50ms)
+ GET /api/agents 200 in 40ms (next.js: 31ms, application-code: 9ms)
+ GET /api/agents 200 in 38ms (next.js: 29ms, application-code: 9ms)
