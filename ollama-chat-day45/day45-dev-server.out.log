@@ -1,0 +1,15 @@
+
+> ollama-chat-day45@0.1.0 dev
+> next dev -p 3001
+
+▲ Next.js 16.2.4 (Turbopack)
+- Local:         http://localhost:3001
+- Network:       http://192.168.84.116:3001
+- Environments: .env.local
+✓ Ready in 7.0s
+
+○ Compiling /api/agents ...
+ GET /api/agents 200 in 5.1s (next.js: 5.1s, application-code: 56ms)
+ GET /api/agents 200 in 197ms (next.js: 156ms, application-code: 41ms)
+○ Compiling / ...
+✓ Finished writing to filesystem cache in 12.6s
