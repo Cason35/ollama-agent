@@ -322,3 +322,269 @@ export const semanticCache = new SemanticCache(); // 进程内共享语义缓存
     在 Trace 中以 cache span 记录每次 hit / miss；提供 /api/cache 接口与 Cache Explorer 前端面板；
     并完整保留更早的回归评估、队列、工作流与 RAG（检索增强生成）等能力。
 ```
+
+---
+
+## 第 48 天总结
+
+第 48 天完成的是：
+
+> Advanced Optimization V1（高级优化第 1 版）：Semantic Cache Runtime（语义缓存运行时）
+
+这是整个 Agent Platform（智能体平台）开始进入「少做重复工作」的重要一步。
+
+以前（每次都重新执行整条链路）：
+
+```text
+User（用户）
+  ↓
+Research（研究）
+  ↓
+Reflection（反思）
+  ↓
+Evaluation（评估）
+  ↓
+Writer（写作）
+```
+
+现在（先查缓存，命中即复用）：
+
+```text
+User（用户）
+  ↓
+Semantic Cache（语义缓存）
+  ↓
+Hit ?（是否命中？）
+  ├─ Hit（命中）  → 直接返回
+  └─ Miss（未命中）→ 正常 Agent Runtime（智能体运行时）
+```
+
+这意味着：
+
+- Token（词元）消耗减少
+- Latency（延迟）下降
+- Cost（成本）下降
+- User Experience（用户体验）提升
+
+### 当前整体进度
+
+```text
+Agent Foundation（智能体基础）              ██████████ 100%
+Workflow Runtime（工作流运行时）            ██████████ 100%
+Tool Runtime（工具运行时）                  ██████████ 100%
+RAG Runtime（检索增强生成运行时）           ██████████ 100%
+Queue Runtime（队列运行时）                 ██████████ 100%
+Execution Platform（执行平台）              ██████████ 100%
+Multi-Agent Runtime（多智能体运行时）       ██████████ 100%
+Continuous Evaluation（持续评估）           ██████████ 100%
+Production Runtime（生产运行时）            ██████████ 100%
+Advanced Optimization（高级优化）           █████░░░░░ 50%
+Deployment & Infra（部署与基础设施）        ░░░░░░░░░░ 0%
+```
+
+整体已经来到：🚀 96%
+
+---
+
+## 第 49 天学习计划
+
+主题：
+
+> Advanced Optimization V2（高级优化第 2 版）：Long-Term Memory V2（长期记忆第 2 版）
+
+### 今天核心目标
+
+让系统真正拥有「跨任务长期成长（Cross-Task Long-Term Growth）」，而不仅仅是「一次任务记忆（Single-Task Memory）」。
+
+### 为什么现在必须做 Long-Term Memory V2（长期记忆第 2 版）？
+
+目前系统已经拥有：
+
+- Memory（记忆）/ Conversation Memory（对话记忆）
+- Workspace（工作空间）/ Task Memory（任务记忆）
+- Cache（缓存）/ Computation Memory（计算记忆）
+
+但是缺少：
+
+- Experience Memory（经验记忆）
+
+因此系统目前无法做到「从过去几十次任务中学习（Learn from Dozens of Past Tasks）」。
+
+真实系统（例如 Deep Research、Devin、Cursor、Claude Code）都会拥有：
+
+- Long-Term Experience Memory（长期经验记忆）
+
+### 最终效果
+
+当系统经历过：
+
+```text
+研究 LangGraph
+研究 CrewAI
+研究 AutoGen
+研究 MCP（Model Context Protocol，模型上下文协议）
+```
+
+以后用户再问「如何学习 Agent（智能体）？」时，系统会自动利用「历史经验（Historical Experience）」，而不是从零开始。
+
+### 任务 1：定义 MemoryItemV2（记忆条目第 2 版）
+
+```ts
+type MemoryItemV2 = {
+  id: string
+  type:
+    | "fact"        // 事实
+    | "preference"  // 偏好
+    | "experience"  // 经验
+    | "decision"    // 决策
+    | "lesson"      // 教训/经验总结
+  content: string        // 记忆内容
+  embedding: number[]    // 向量（用于语义检索）
+  importance: number     // 重要性
+  confidence: number     // 置信度
+  source: {              // 来源
+    traceId?: string     // 追踪记录标识
+    workspaceId?: string // 工作空间标识
+    agentId?: string     // 智能体标识
+  }
+  createdAt: number       // 创建时间
+  lastAccessedAt: number  // 最近访问时间
+  accessCount: number     // 访问次数
+}
+```
+
+### 任务 2：实现 LongTermMemoryStore（长期记忆存储）
+
+支持以下方法：
+
+- `add()`（新增）
+- `retrieve()`（检索）
+- `update()`（更新）
+- `delete()`（删除）
+- `stats()`（统计）
+
+建议：直接复用 VectorStore（向量存储）作为底层。
+
+### 任务 3：Experience Extraction（经验提取）
+
+从 Workspace（工作空间）、Reflection（反思）、Evaluation（评估）中自动提取「经验」。
+
+例如生成一条 Lesson（教训/经验总结）：
+
+> Research Agent（研究智能体）在知识密集型任务（Knowledge-Intensive Task）中效果最好。
+
+保存为 `type = lesson`。
+
+### 任务 4：Memory Consolidation（记忆整合 / 压缩）
+
+新增 `consolidateMemories()`（整合记忆）方法，作用是压缩重复经验。
+
+例如把五条「LangGraph DAG（有向无环图）很重要」合并为一条。
+
+### 任务 5：Importance Decay（重要性衰减）
+
+新增 `importanceDecay()`（重要性衰减）方法：
+
+- 随着时间推移，`importance`（重要性）下降；
+- 但 `accessCount`（访问次数）越高，衰减越慢。
+
+### 任务 6：Memory Retrieval V2（记忆检索第 2 版）
+
+支持综合打分：semantic search（语义检索）+ importance score（重要性分）+ recency score（新近度分）+ access frequency（访问频率）。
+
+综合公式：
+
+```text
+memoryScore（记忆综合分）
+  = 0.5 × semantic（语义相似度）
+  + 0.3 × importance（重要性）
+  + 0.2 × recency（新近度）
+```
+
+### 任务 7：Agent Runtime（智能体运行时）接入
+
+执行 Research Agent（研究智能体）时，把：
+
+```text
+之前： Prompt（提示词）
+升级： Prompt（提示词） + Long-Term Experience（长期经验）
+```
+
+### 任务 8：Memory Explorer V2（记忆浏览器第 2 版）
+
+新增 Type Filter（类型筛选）：fact（事实）/ lesson（教训）/ decision（决策）/ experience（经验）。
+
+展示：importance（重要性）、confidence（置信度）、accessCount（访问次数）、lastAccessedAt（最近访问时间）。
+
+支持：edit（编辑）、delete（删除）、pin（置顶）。
+
+### 任务 9：Memory Metrics（记忆指标）
+
+```ts
+type MemoryMetrics = {
+  totalMemories      // 记忆总数
+  avgImportance      // 平均重要性
+  avgAccessCount     // 平均访问次数
+  retrievalHitRate   // 检索命中率
+  consolidationRatio // 整合压缩比
+  decayCount         // 衰减条目数
+}
+```
+
+### 任务 10：完整测试
+
+- 测试 1：完成「研究 LangGraph / 研究 CrewAI / 研究 MCP」后，自动生成 lessons（经验总结）。
+- 测试 2：之后问「如何学习 Agent（智能体）？」，验证系统能利用 experience memory（经验记忆）。
+- 测试 3：对重复经验「LangGraph DAG（有向无环图）很重要」，验证是否被 consolidate（整合压缩）。
+
+### 第 49 天验收标准
+
+1. 是否定义 MemoryItemV2（记忆条目第 2 版）
+2. 是否实现 LongTermMemoryStore（长期记忆存储）
+3. 是否实现 Experience Extraction（经验提取）
+4. 是否实现 Memory Consolidation（记忆整合）
+5. 是否实现 Importance Decay（重要性衰减）
+6. 是否升级 Memory Retrieval（记忆检索）
+7. Agent Runtime（智能体运行时）是否接入 Long-Term Memory（长期记忆）
+8. 是否实现 Memory Explorer V2（记忆浏览器第 2 版）
+9. 是否增加 Memory Metrics（记忆指标）
+10. 是否完成 Long-Term Memory Test（长期记忆测试）
+
+### 第 49 天打卡模板
+
+```text
+【第49天打卡】
+
+1. 是否定义 MemoryItemV2（记忆条目第 2 版）：是 / 否
+2. 是否实现 LongTermMemoryStore（长期记忆存储）：是 / 否
+
+3. 是否实现 Experience Extraction（经验提取）：是 / 否
+4. 是否实现 Memory Consolidation（记忆整合）：是 / 否
+
+5. 是否实现 Importance Decay（重要性衰减）：是 / 否
+6. 是否升级 Memory Retrieval（记忆检索）：是 / 否
+
+7. Agent Runtime（智能体运行时）是否接入 Long-Term Memory（长期记忆）：是 / 否
+
+8. 是否实现 Memory Explorer V2（记忆浏览器第 2 版）：是 / 否
+
+9. 是否增加 Memory Metrics（记忆指标）：是 / 否
+
+10. 是否完成 Long-Term Memory Test（长期记忆测试）：是 / 否
+
+11. 遇到的最大问题：
+
+12. 当前系统能力：
+```
+
+### 第 49 天核心认知
+
+记住一句话：
+
+> Cache（缓存）负责避免重复思考，Long-Term Memory（长期记忆）负责积累经验。
+
+完成第 49 天以后，系统会升级为：
+
+> Advanced Optimization V2（高级优化第 2 版）：Experience Memory System（经验记忆系统）
+
+这一步完成以后，你会拥有真正意义上「会成长的 Agent Platform（智能体平台）」，也是从 Smart Agent（智能体）迈向 Autonomous Learning Agent（自主学习智能体）最关键的一步。
