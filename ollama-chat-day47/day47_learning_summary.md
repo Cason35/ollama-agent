@@ -669,3 +669,339 @@ componentId：由哪个组件执行
 12. 当前系统能力：
 
 当前系统已经升级为 Production Runtime V3（生产运行时第3版），具备 Usage & Cost Observability（用量与成本可观测性）。系统可以统一记录 Agent（智能体）、Tool（工具）、Reflection（反思）和 Evaluation（评估）的输入词元、输出词元、总词元、预估费用与执行耗时；可以通过 Trace（追踪记录）和 Span（追踪跨度）定位成本来源；可以统计总费用、总词元、平均任务成本、成本最高的智能体和工具；可以展示 Cost Breakdown（成本构成分析）；并可以结合质量分数与费用完成 Prompt ROI Test（提示词投资回报率测试）。同时，Day 46 的 Evaluation Dataset（评估数据集）、Bad Case Management（失败案例管理）、Regression Evaluation（回归评估）和 Quality Gate（质量门禁）能力继续保留。
+
+---
+
+## 🎉 第 47 天总结
+
+你第 47 天完成的是：
+
+> 🔥 Production Runtime V4（生产运行时第 4 版）：Usage & Cost Observability（用量与成本可观测性）
+
+这一步意味着：
+
+你的 Agent（智能体）系统已经不再只是：
+
+- 能跑
+
+而是：
+
+- 知道自己跑了多少；
+- 知道自己花了多少；
+- 知道哪里最贵；
+- 知道哪里值得优化。
+
+现在你的系统已经形成：
+
+```text
+Trace（追踪记录）
+  ↓
+Usage（用量）
+  ↓
+Evaluation（评估）
+  ↓
+Regression（回归评估）
+  ↓
+ROI（Return on Investment，投资回报率）
+```
+
+这一整条 Production Optimization（生产优化）链。
+
+实际上已经非常接近：
+
+- LangSmith（LangChain 的可观测性与评估平台）；
+- Helicone（大语言模型用量与成本监控平台）；
+- LiteLLM（统一多模型调用与用量计费的代理层）；
+- OpenAI Usage Dashboard（OpenAI 官方用量看板）。
+
+的思想。
+
+### 当前整体进度
+
+```text
+Agent Foundation（智能体基础）            ██████████ 100%
+
+Workflow Runtime（工作流运行时）          ██████████ 100%
+Tool Runtime（工具运行时）               ██████████ 100%
+RAG Runtime（检索增强生成运行时）         ██████████ 100%
+
+Queue Runtime（队列运行时）              ██████████ 100%
+Execution Platform（执行平台）           ██████████ 100%
+
+Multi-Agent Runtime（多智能体运行时）     ██████████ 100%
+
+Continuous Evaluation（持续评估）         ██████████ 100%
+
+Production Runtime（生产运行时）          ██████████ 100%
+
+Advanced Optimization（高级优化）         ███░░░░░░░ 30%
+
+Deployment & Infra（部署与基础设施）      ░░░░░░░░░░ 0%
+```
+
+整体：
+
+> 🚀 95%
+
+---
+
+## 第 48 天学习计划
+
+### Advanced Optimization V1（高级优化第 1 版）：Semantic Cache Runtime（语义缓存运行时）
+
+#### 今天核心目标
+
+让系统学会：
+
+> 不要重复思考已经思考过的问题。
+
+#### 为什么今天必须学？
+
+现在用户连续问：
+
+> LangGraph（用于构建有状态大语言模型工作流的图式框架）是什么？
+
+然后：
+
+> 请介绍 LangGraph
+
+再：
+
+> 解释一下 LangGraph
+
+系统会：
+
+```text
+Research Agent（研究智能体）
+  ↓
+Retrieval（检索）
+  ↓
+Reflection（反思）
+  ↓
+Evaluation（评估）
+  ↓
+Writer（写作智能体）
+```
+
+重新跑一遍。
+
+成本：
+
+> ×3
+
+真实系统都会做 Cache（缓存）。例如：
+
+- GPT Cache（面向大语言模型的语义缓存库）；
+- LangChain Cache（LangChain 内置缓存机制）；
+- Redis Semantic Cache（基于 Redis 的语义缓存）；
+- Claude Prompt Cache（Claude 的提示词缓存）。
+
+#### 最终效果
+
+第一次：
+
+> 研究 LangGraph
+
+耗时：8s（秒）；成本：$0.01（美元）。
+
+第二次：
+
+> 介绍 LangGraph
+
+耗时：0.1s（秒）；成本：≈0。
+
+---
+
+### 任务 1：定义 CacheEntry（缓存条目）
+
+新增：
+
+```ts
+type CacheEntry = {
+  id: string
+
+  query: string
+
+  embedding: number[]
+
+  answer: string
+
+  metadata: {
+    traceId?: string
+
+    score: number
+
+    createdAt: number
+  }
+}
+```
+
+### 任务 2：实现 SemanticCache（语义缓存）
+
+新增：
+
+```ts
+class SemanticCache {
+  add()
+
+  search()
+
+  invalidate()
+
+  clear()
+}
+```
+
+底层使用 VectorStore（向量存储）即可。
+
+### 任务 3：计算 Query Embedding（查询向量）
+
+用户问题：
+
+> 介绍 LangGraph
+
+生成 embedding（向量表示），用于 cache search（缓存检索）。
+
+### 任务 4：实现 Similarity Search（相似度检索）
+
+比较当前 query embedding（查询向量）和历史 query embedding（历史查询向量），计算 cosine similarity（余弦相似度）。
+
+如果 score（相似度分数）> 0.9，认为 Cache Hit（缓存命中）。
+
+### 任务 5：Agent Runtime（智能体运行时）接入 Cache（缓存）
+
+执行顺序：
+
+```text
+User Query（用户查询）
+  ↓
+Semantic Cache（语义缓存）
+  ↓
+Hit ?（是否命中）
+  ↓
+直接返回
+  ↓
+Miss（未命中）
+  ↓
+正常执行 Agent（智能体）
+```
+
+### 任务 6：记录 Cache Metrics（缓存指标）
+
+新增：
+
+```ts
+type CacheMetrics = {
+  hitCount          // 命中次数
+  missCount         // 未命中次数
+  hitRate           // 命中率
+  savedTokens       // 节省的词元
+  savedCost         // 节省的费用
+  avgLatencyReduction // 平均延迟降低
+}
+```
+
+### 任务 7：Trace（追踪记录）接入 Cache（缓存）
+
+新增 cache span（缓存跨度）。
+
+状态：
+
+- hit（命中）；
+- miss（未命中）。
+
+### 任务 8：Cache Explorer（缓存浏览器）
+
+前端新增：
+
+- Query（查询）；
+- Similarity（相似度）；
+- CreatedAt（创建时间）；
+- HitCount（命中次数）；
+- Cost Saved（节省的成本）。
+
+支持 invalidate（手动失效）。
+
+### 任务 9：TTL 与失效策略
+
+新增 ttlMs（Time To Live，存活时间，单位毫秒）。
+
+支持：
+
+- 24h（24 小时）；
+- 7d（7 天）；
+- never（永不过期）。
+
+以及 LRU（Least Recently Used，最近最少使用淘汰策略）。
+
+### 任务 10：测试
+
+测试 Case1（用例 1）：
+
+- 第一次：`LangGraph 是什么` → 应该 Miss（未命中）；
+- 第二次：`介绍 LangGraph` → 应该 Hit（命中）；
+- 第三次：`LangGraph 有什么作用` → 应该 Hit（命中）；
+- 第四次：`Redis 是什么` → 应该 Miss（未命中）。
+
+---
+
+### 第 48 天验收标准
+
+1. 是否定义 CacheEntry（缓存条目）；
+2. 是否实现 SemanticCache（语义缓存）；
+3. 是否实现 Query Embedding（查询向量）；
+4. 是否实现 Similarity Search（相似度检索）；
+5. Agent Runtime（智能体运行时）是否接入 Cache（缓存）；
+6. 是否增加 Cache Metrics（缓存指标）；
+7. Trace（追踪记录）是否接入 Cache（缓存）；
+8. 是否实现 Cache Explorer（缓存浏览器）；
+9. 是否支持 TTL 与失效策略；
+10. 是否完成 Cache Test（缓存测试）。
+
+---
+
+### 第 48 天打卡模板
+
+```text
+【第48天打卡】
+
+1. 是否定义 CacheEntry：是 / 否
+2. 是否实现 SemanticCache：是 / 否
+
+3. 是否实现 Query Embedding：是 / 否
+4. 是否实现 Similarity Search：是 / 否
+
+5. Agent Runtime 是否接入 Cache：是 / 否
+
+6. 是否增加 Cache Metrics：是 / 否
+
+7. Trace 是否接入 Cache：是 / 否
+
+8. 是否实现 Cache Explorer：是 / 否
+
+9. 是否支持 TTL 与失效策略：是 / 否
+
+10. 是否完成 Cache Test：是 / 否
+
+11. 遇到的最大问题：
+
+12. 当前系统能力：
+```
+
+---
+
+### 🧠 第 48 天核心认知
+
+记住一句话：
+
+> Memory（记忆）是记住事实，Cache（缓存）是避免重复思考。
+
+完成第 48 天以后，你的系统将升级为：
+
+> 🔥 Advanced Optimization V1（高级优化第 1 版）：Semantic Cache Runtime（语义缓存运行时）
+
+这一步完成后，你的 Agent（智能体）平台已经开始拥有：
+
+> 思考过一次，以后尽量不再思考。
+
+这也是 Cursor（AI 编程编辑器）、Claude Code（Anthropic 的命令行编程智能体）、Devin（自主软件工程智能体）、Deep Research（深度研究类智能体）背后的重要优化思想。
