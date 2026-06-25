@@ -245,3 +245,372 @@ Agent 真实生成走的是 `invokeAgentModel`，它把 `rt`（ModelRuntime，�
 完成第 50 天后，系统升级为：
 
 > Advanced Optimization V3（高级优化第 3 版）：Multi-Model Routing Runtime（多模型路由运行时）
+
+---
+
+## 第 50 天补充总结与第 51 天学习计划
+
+### 第 50 天总结
+
+第 50 天完成的是：
+
+> Advanced Optimization V3（高级优化第 3 版）：Multi-Model Routing Runtime（多模型路由运行时）
+
+这一步非常关键。系统现在已经不再是“所有任务都用同一个模型”，而是开始具备生产级调度能力：
+
+```text
+不同任务
+↓
+不同模型
+↓
+不同成本
+↓
+不同质量
+```
+
+目前系统已经拥有：
+
+| 能力 | 中文说明 |
+| --- | --- |
+| `ModelProfile` | 模型档案，用来描述模型的 id、provider（模型提供方）、model（底层模型名）、capabilities（能力）、cost（成本）、speed（速度）和 quality（质量）等信息。 |
+| `ModelRegistry` | 模型注册表，用来集中登记、查询和统计所有可用模型。 |
+| `ModelRouter` | 模型路由器，根据任务类型、复杂度、延迟偏好、JSON（结构化数据格式）要求等条件选择合适模型。 |
+| 多模型档案 | 把不同模型抽象成可调度资源，而不是散落在业务代码里的字符串。 |
+| Agent Runtime（智能体运行时）模型路由 | 智能体执行任务时可以按职责选择模型，例如 planner（规划者）走大推理模型，writer（写作者）走小模型。 |
+| Tool Runtime（工具运行时）模型路由 | 工具调用时也能根据工具类型选择模型，例如 summary（总结）工具走小模型，embedding（向量嵌入）工具走嵌入模型。 |
+| Usage（用量统计）记录模型信息 | 每次调用记录 modelId（模型 ID）、provider（提供方）、modelName（模型名）等信息，方便做成本归因。 |
+| Model Explorer（模型浏览器） | 前端页面用于查看模型档案、路由预览和模型统计信息。 |
+| 模型路由测试 | 用自动化测试验证不同任务能被路由到预期模型。 |
+
+这意味着系统已经具备一层新的能力：
+
+> 算力调度层（Compute Scheduling Layer，用规则把任务分配给合适模型的调度层）。
+
+### 第 51 天学习计划
+
+第 51 天的主题是：
+
+> Advanced Optimization V4（高级优化第 4 版）：Model Fallback & Circuit Breaker（模型降级备用与熔断器）
+
+今日核心目标：
+
+让模型调用失败时，系统不会直接崩溃，而是能自动切换到备用模型；当某个模型持续不稳定时，系统能暂时熔断它，避免继续把请求打到坏掉的模型上。
+
+### 为什么第 51 天必须做
+
+现在 `ModelRouter`（模型路由器）已经能回答“该用谁”。但真实系统还必须回答另一个问题：
+
+> 如果它坏了怎么办？
+
+可能出现的问题包括：
+
+- Ollama（本地大模型运行框架）挂了。
+- 模型调用超时。
+- JSON（结构化数据格式）模型输出漂移，不再稳定返回合法结构。
+- 大模型调用失败。
+- 某个 provider（模型提供方）不稳定。
+
+生产系统不能直接失败，而应该有这样的链路：
+
+```text
+Primary Model（主模型）
+↓ 失败
+Fallback Model（备用模型）
+↓ 失败
+Degraded Response（降级响应）
+```
+
+同时，如果某个模型连续失败，系统需要暂时禁用它。这就是：
+
+> Circuit Breaker（熔断器）：连续失败后暂时阻止调用，等待一段时间后再试探恢复。
+
+### 第 51 天最终效果
+
+例如：
+
+```text
+primary: qwen2.5:14b
+fallback: qwen2.5:7b
+```
+
+如果 primary（主模型）超时：
+
+```text
+自动切换 fallback（备用模型）
+```
+
+如果 primary（主模型）连续失败 5 次：
+
+```text
+circuit = open（熔断开启）
+暂时不再路由到它
+```
+
+一段时间后：
+
+```text
+half-open（半开状态）
+尝试恢复
+```
+
+### 任务 1：升级 ModelProfile（模型档案）
+
+增加 fallback（备用模型）配置：
+
+```ts
+type ModelProfile = {
+  id: string
+  model: string
+  provider: string
+
+  fallbackModelIds?: string[]
+
+  timeoutMs?: number
+
+  maxRetries?: number
+}
+```
+
+字段说明：
+
+- `fallbackModelIds`（备用模型 ID 列表）：当前模型失败后按顺序尝试的备用模型。
+- `timeoutMs`（超时时间，毫秒）：单次模型调用最多等待多久。
+- `maxRetries`（最大重试次数）：同一个模型失败后最多重试几次。
+
+### 任务 2：定义 ModelCallResult（模型调用结果）
+
+```ts
+type ModelCallResult = {
+  modelId: string
+  success: boolean
+  output?: string
+  error?: string
+  fallbackUsed?: boolean
+  fallbackChain?: string[]
+  durationMs: number
+}
+```
+
+字段说明：
+
+- `modelId`（模型 ID）：最终返回结果的模型。
+- `success`（是否成功）：本次调用是否成功。
+- `output`（输出内容）：模型成功时返回的文本。
+- `error`（错误信息）：模型失败时记录的错误。
+- `fallbackUsed`（是否使用备用模型）：是否从主模型切到了 fallback（备用模型）。
+- `fallbackChain`（备用链路）：本次调用依次尝试过的模型列表。
+- `durationMs`（耗时毫秒数）：本次调用总耗时。
+
+### 任务 3：实现 ModelExecutor（模型执行器）
+
+不要再让业务代码直接调用 `callLLM`（调用大语言模型的底层函数）。统一改成：
+
+```ts
+modelExecutor.call({
+  modelId,
+  prompt,
+  options
+})
+```
+
+`ModelExecutor`（模型执行器）内部负责：
+
+- timeout（超时控制）
+- retry（重试）
+- fallback（备用模型切换）
+- usage（用量统计）
+- trace（追踪记录）
+
+这样业务层只关心“我要调用某个模型”，不用关心失败恢复细节。
+
+### 任务 4：实现 Fallback Chain（备用模型链）
+
+调用逻辑：
+
+```text
+primary（主模型）
+↓ failed（失败）
+fallback1（备用模型 1）
+↓ failed（失败）
+fallback2（备用模型 2）
+↓ failed（失败）
+degraded response（降级响应）
+```
+
+伪代码：
+
+```ts
+const chain = [primary, ...primary.fallbackModelIds]
+
+for (const model of chain) {
+  try {
+    return await callModel(model)
+  } catch (err) {
+    recordFailure(model.id)
+  }
+}
+```
+
+### 任务 5：实现 CircuitBreaker（熔断器）
+
+新增类型：
+
+```ts
+type CircuitState = "closed" | "open" | "half_open"
+
+type CircuitBreakerState = {
+  modelId: string
+  state: CircuitState
+  failureCount: number
+  openedAt?: number
+  lastFailureAt?: number
+}
+```
+
+状态说明：
+
+| 状态 | 中文说明 |
+| --- | --- |
+| `closed` | 闭合状态，模型正常使用。 |
+| `open` | 开启熔断，模型暂时不可用。 |
+| `half_open` | 半开状态，允许少量请求试探模型是否恢复。 |
+
+### 任务 6：实现 CircuitBreakerManager（熔断器管理器）
+
+```ts
+class CircuitBreakerManager {
+  canCall(modelId: string): boolean
+
+  recordSuccess(modelId: string): void
+
+  recordFailure(modelId: string): void
+
+  getState(modelId: string): CircuitBreakerState
+}
+```
+
+规则建议：
+
+- 失败 3 次 → `open`（开启熔断）
+- `open`（熔断开启）30 秒后 → `half_open`（半开试探）
+- `half_open`（半开状态）成功 → `closed`（恢复正常）
+- `half_open`（半开状态）失败 → `open`（重新熔断）
+
+### 任务 7：ModelRouter（模型路由器）避开熔断模型
+
+路由时增加熔断判断：
+
+```ts
+if (!circuitBreaker.canCall(model.id)) {
+  skip model
+}
+```
+
+如果首选模型不可用，就选择 fallback（备用模型）或下一个合适模型。
+
+### 任务 8：Trace / Usage（追踪与用量统计）接入 fallback 信息
+
+Trace span metadata（追踪跨度元数据）增加：
+
+```ts
+{
+  modelId,
+  fallbackUsed,
+  fallbackChain,
+  circuitState
+}
+```
+
+`UsageRecord`（用量记录）增加：
+
+```ts
+fallbackUsed?: boolean
+```
+
+这样系统可以回答：
+
+- 哪些调用使用了 fallback（备用模型）。
+- 哪些模型经常失败。
+- 哪些模型处于 circuit open（熔断开启）状态。
+
+### 任务 9：Model Health Dashboard（模型健康仪表盘）
+
+前端展示 Model Health（模型健康状态）：
+
+```text
+Model Health
+
+qwen2.5:14b
+state: closed
+failureCount: 0
+successRate: 98%
+
+qwen2.5:7b
+state: open
+failureCount: 4
+```
+
+重点指标：
+
+- `state`（熔断状态）
+- `failureCount`（失败次数）
+- `successRate`（成功率）
+- `fallbackUsed`（备用模型使用情况）
+- `lastFailureAt`（最近失败时间）
+
+### 任务 10：Fallback（备用模型）测试
+
+准备测试：
+
+1. primary（主模型）正常 → 不使用 fallback（备用模型）。
+2. primary（主模型）模拟失败 → fallback（备用模型）成功。
+3. primary（主模型）连续失败 → circuit open（熔断开启）。
+4. half-open（半开状态）成功 → 恢复 closed（正常状态）。
+
+### 第 51 天验收标准
+
+1. `ModelProfile`（模型档案）是否支持 fallback（备用模型）配置。
+2. 是否定义 `ModelCallResult`（模型调用结果）。
+3. 是否实现 `ModelExecutor`（模型执行器）。
+4. 是否实现 fallback chain（备用模型链）。
+5. 是否实现 `CircuitBreaker`（熔断器）。
+6. 是否实现 `CircuitBreakerManager`（熔断器管理器）。
+7. `ModelRouter`（模型路由器）是否避开熔断模型。
+8. Trace / Usage（追踪与用量统计）是否记录 fallback（备用模型）信息。
+9. 是否实现 Model Health Dashboard（模型健康仪表盘）。
+10. 是否完成 fallback / circuit breaker（备用模型 / 熔断器）测试。
+
+### 第 51 天打卡模板
+
+```text
+【第51天打卡】
+
+1. ModelProfile（模型档案）是否支持 fallback（备用模型）配置：是 / 否
+2. 是否定义 ModelCallResult（模型调用结果）：是 / 否
+
+3. 是否实现 ModelExecutor（模型执行器）：是 / 否
+4. 是否实现 fallback chain（备用模型链）：是 / 否
+
+5. 是否实现 CircuitBreaker（熔断器）：是 / 否
+6. 是否实现 CircuitBreakerManager（熔断器管理器）：是 / 否
+
+7. ModelRouter（模型路由器）是否避开熔断模型：是 / 否
+8. Trace / Usage（追踪与用量统计）是否记录 fallback（备用模型）信息：是 / 否
+
+9. 是否实现 Model Health Dashboard（模型健康仪表盘）：是 / 否
+10. 是否完成 fallback / circuit breaker（备用模型 / 熔断器）测试：是 / 否
+
+11. 遇到的最大问题：
+
+12. 当前系统能力：
+```
+
+### 第 51 天核心认知
+
+记住一句话：
+
+> Model Router（模型路由器）解决“该用谁”，Fallback + Circuit Breaker（备用模型切换 + 熔断器）解决“它坏了怎么办”。
+
+完成第 51 天后，系统会升级为：
+
+> Advanced Optimization V4（高级优化第 4 版）：Resilient Multi-Model Runtime（具备容错能力的多模型运行时）
