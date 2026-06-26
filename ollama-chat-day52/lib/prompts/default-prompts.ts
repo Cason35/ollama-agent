@@ -1,0 +1,35 @@
+import { PromptRegistry } from "@/lib/prompts/prompt-registry"; /* 第52天：引入 PromptRegistry（提示词注册表）类。 */
+import type { PromptTemplate } from "@/lib/prompts/prompt-types"; /* 第52天：引入提示词模板类型。 */
+
+const CREATED_AT = 1_782_414_400_000; /* 第52天：使用固定时间戳作为教学数据创建时间，保证测试快照稳定。 */
+
+function prompt(input: Omit<PromptTemplate, "createdAt" | "updatedAt"> & { updatedOffset?: number }): PromptTemplate { /* 第52天：定义默认提示词模板创建助手。 */
+  const updatedAt = CREATED_AT + (input.updatedOffset ?? 0); /* 第52天：根据偏移生成稳定更新时间。 */
+  const rest = { ...input }; /* 第52天：复制输入对象，避免直接修改调用方传入的数据。 */
+  delete rest.updatedOffset; /* 第52天：移除仅用于默认数据的偏移字段，避免写入 PromptTemplate。 */
+  return { ...rest, createdAt: CREATED_AT, updatedAt }; /* 第52天：补齐创建和更新时间后返回模板。 */
+} /* 第52天：结束默认模板创建助手。 */
+
+export const defaultPromptTemplates: PromptTemplate[] = [ /* 第52天：定义系统默认提示词版本集合。 */
+  prompt({ id: "supervisor.v1", name: "Supervisor 基线调度提示词", componentType: "supervisor", componentId: "supervisor", version: "v1", status: "archived", variables: ["task", "agents"], source: "day45-code-inline", score: 82, costEstimate: 0.006, updatedOffset: 1, template: "你是一个多智能体调度器。\n任务：{{task}}\n可用 Agent：{{agents}}\n请返回一个可执行计划。" }), /* 第52天：注册监督调度提示词 v1。 */
+  prompt({ id: "supervisor.v2", name: "Supervisor DAG 调度提示词", componentType: "supervisor", componentId: "supervisor", version: "v2", status: "active", variables: ["task", "agents"], source: "day52-prompt-registry", score: 90, costEstimate: 0.007, updatedOffset: 2, template: "你是一个多智能体 Supervisor（调度器）。\n用户任务：{{task}}\n可用 Agent：{{agents}}\n请生成只包含必要 Agent 的 DAG 计划，明确 dependsOn，并只返回 JSON。" }), /* 第52天：注册监督调度提示词 v2。 */
+  prompt({ id: "research.v1", name: "Research 简短检索提示词", componentType: "agent", componentId: "research", version: "v1", status: "archived", variables: ["task"], source: "day40-code-inline", score: 74, costEstimate: 0.004, updatedOffset: 3, template: "你是研究型 Agent。\n请围绕任务收集资料并简短回答：{{task}}" }), /* 第52天：注册研究 Agent 提示词 v1。 */
+  prompt({ id: "research.v2", name: "Research 结构化检索提示词", componentType: "agent", componentId: "research", version: "v2", status: "archived", variables: ["task", "memory", "tools"], source: "day45-prompt-ab-baseline", score: 81, costEstimate: 0.006, updatedOffset: 4, template: "你是研究型 Agent，负责收集、检索和整理资料。\n任务：{{task}}\n可用工具：{{tools}}\n长期记忆：{{memory}}\n请给出简洁结论。" }), /* 第52天：注册研究 Agent 提示词 v2。 */
+  prompt({ id: "research.v3", name: "Research 可追踪证据提示词", componentType: "agent", componentId: "research", version: "v3", status: "active", variables: ["task", "memory", "workspace", "tools"], source: "day52-regression-candidate", score: 88, costEstimate: 0.00672, updatedOffset: 5, template: "你是研究型 Agent，负责收集、检索和整理资料。\n任务：{{task}}\n可用工具：{{tools}}\n长期记忆：{{memory}}\n共享工作空间：{{workspace}}\n请先列出关键发现，再标注证据来源，最后给出风险和下一步。" }), /* 第52天：注册研究 Agent 提示词 v3。 */
+  prompt({ id: "planner.v2", name: "Planner 工作流拆解提示词", componentType: "agent", componentId: "planner", version: "v2", status: "active", variables: ["task", "workspace", "tools"], source: "day52-prompt-registry", score: 86, costEstimate: 0.007, updatedOffset: 6, template: "你是规划型 Agent。\n任务：{{task}}\n共享工作空间：{{workspace}}\n可用工具：{{tools}}\n请拆解为步骤、依赖、验收标准和回滚预案。" }), /* 第52天：注册规划 Agent 提示词。 */
+  prompt({ id: "writer.v2", name: "Writer 汇总输出提示词", componentType: "agent", componentId: "writer", version: "v2", status: "active", variables: ["task", "workspace"], source: "day52-prompt-registry", score: 87, costEstimate: 0.005, updatedOffset: 7, template: "你是写作型 Agent。\n任务：{{task}}\n共享工作空间：{{workspace}}\n请把上游结果整理为清晰、可读、可执行的最终回答。" }), /* 第52天：注册写作 Agent 提示词。 */
+  prompt({ id: "critic.v2", name: "Critic 风险审查提示词", componentType: "agent", componentId: "critic", version: "v2", status: "active", variables: ["task", "workspace"], source: "day52-prompt-registry", score: 85, costEstimate: 0.0055, updatedOffset: 8, template: "你是审查型 Agent。\n任务：{{task}}\n共享工作空间：{{workspace}}\n请指出遗漏、风险、假设和需要补证的地方。" }), /* 第52天：注册审查 Agent 提示词。 */
+  prompt({ id: "reflection.v2", name: "Reflection 结构化自检提示词", componentType: "reflection", componentId: "reflection", version: "v2", status: "active", variables: ["agentId", "task", "output", "threshold"], source: "day52-prompt-registry", score: 89, costEstimate: 0.0045, updatedOffset: 9, template: "请审查 {{agentId}} 针对任务的输出质量。\n任务：{{task}}\n输出：{{output}}\n请从完整性、准确性、逻辑性、覆盖度评分，并只返回 JSON：{\"score\":number,\"issues\":string[],\"suggestions\":string[],\"shouldRetry\":boolean}。\n低于 {{threshold}} 分时 shouldRetry 为 true。" }), /* 第52天：注册反思提示词。 */
+  prompt({ id: "evaluation.v2", name: "Evaluation 四维评分提示词", componentType: "evaluation", componentId: "evaluation", version: "v2", status: "active", variables: ["agentId", "task", "output"], source: "day52-prompt-registry", score: 91, costEstimate: 0.005, updatedOffset: 10, template: "请评估 {{agentId}} 针对任务的最终输出质量。\n任务：{{task}}\n输出：{{output}}\n请从 Completeness、Correctness、Relevance、Coverage 四个维度给出 0 到 100 分，并只返回 JSON：{\"score\":number,\"dimensions\":{\"completeness\":number,\"correctness\":number,\"relevance\":number,\"coverage\":number},\"strengths\":string[],\"weaknesses\":string[],\"suggestions\":string[]}。" }), /* 第52天：注册评估提示词。 */
+  prompt({ id: "query-rewrite.v2", name: "Query Rewrite 上下文改写提示词", componentType: "tool", componentId: "queryRewrite", version: "v2", status: "active", variables: ["task", "memory", "workspace"], source: "day52-prompt-registry", score: 84, costEstimate: 0.003, updatedOffset: 11, template: "你是 RAG 查询改写器。\n用户问题：{{task}}\n长期记忆：{{memory}}\n知识库主题：{{workspace}}\n请生成 3-5 个适合检索的 query，只返回 JSON。" }), /* 第52天：注册查询改写工具提示词。 */
+  prompt({ id: "rag.v2", name: "RAG 严谨引用提示词", componentType: "tool", componentId: "ragAnswer", version: "v2", status: "active", variables: ["task", "workspace"], source: "day52-prompt-registry", score: 86, costEstimate: 0.004, updatedOffset: 12, template: "你是严谨的知识库问答助手。\n用户问题：{{task}}\n知识片段：{{workspace}}\n请优先基于片段回答；知识不足时明确说明；末尾列出参考片段。" }), /* 第52天：注册 RAG 工具提示词。 */
+  prompt({ id: "summary.v2", name: "Summary 工具摘要提示词", componentType: "tool", componentId: "summary", version: "v2", status: "active", variables: ["task"], source: "day52-prompt-registry", score: 83, costEstimate: 0.002, updatedOffset: 13, template: "请把以下内容总结成清晰要点，并保留关键限制：{{task}}" }), /* 第52天：注册总结工具提示词。 */
+]; /* 第52天：结束默认提示词版本集合。 */
+
+export function createDefaultPromptRegistry(): PromptRegistry { /* 第52天：定义创建默认 PromptRegistry（提示词注册表）的工厂函数。 */
+  const registry = new PromptRegistry(); /* 第52天：创建空注册表。 */
+  defaultPromptTemplates.forEach((template) => registry.register(template)); /* 第52天：逐条注册默认提示词模板。 */
+  return registry; /* 第52天：返回已经填充默认版本的注册表。 */
+} /* 第52天：结束默认注册表工厂函数。 */
+
+export const promptRegistry = createDefaultPromptRegistry(); /* 第52天：导出进程内共享 PromptRegistry（提示词注册表）单例。 */
