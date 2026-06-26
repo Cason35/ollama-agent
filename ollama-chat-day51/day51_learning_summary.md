@@ -514,3 +514,433 @@ ModelRouter（模型路由器）负责“该用谁”，ModelExecutor（模型�
 完成第 51 天后，系统升级为：
 
 > Advanced Optimization V4（高级优化第 4 版）：Resilient Multi-Model Runtime（具备容错能力的多模型运行时）
+
+---
+
+## 第 51 天补充总结与第 52 天学习计划
+
+### 第 51 天补充总结
+
+第 51 天完成的是：
+
+> Advanced Optimization V4（高级优化第 4 版）：Resilient Multi-Model Runtime（具备容错能力的多模型运行时）
+
+这一步非常关键。
+
+Day 50 解决的是：
+
+> 该用哪个模型？
+
+Day 51 解决的是：
+
+> 模型坏了怎么办？
+
+现在系统已经具备：
+
+| 能力 | 中文说明 |
+| --- | --- |
+| ModelExecutor（模型执行器） | 统一处理模型调用、超时、重试、备用模型链和降级响应。 |
+| fallback chain（备用模型链） | 主模型失败后，按顺序尝试备用模型。 |
+| CircuitBreaker（熔断器） | 某个模型连续失败后，暂时停止调用它。 |
+| CircuitBreakerManager（熔断器管理器） | 集中维护模型的熔断状态、失败次数、成功率和恢复试探。 |
+| ModelRouter（模型路由器）避开熔断模型 | 路由时跳过 open（熔断开启）状态的模型。 |
+| Trace / Usage（追踪与用量统计）记录 fallback（备用模型）信息 | 记录 `fallbackUsed`（是否使用备用模型）、`fallbackChain`（备用模型链）和 `circuitState`（熔断状态）。 |
+| Model Health Dashboard（模型健康仪表盘） | 展示模型状态、失败次数、成功率、最近失败时间和备用链触发次数。 |
+| fallback / circuit breaker（备用模型 / 熔断器）测试 | 自动化验证主模型成功、备用模型成功、熔断打开、半开恢复和降级响应。 |
+
+这意味着 Agent Platform（智能体平台）开始具备生产系统必需的 Disaster Recovery（容灾能力）和 Fault Tolerance（故障容错能力）。
+
+一句话概括：
+
+> Day 50 让系统会“选模型”，Day 51 让系统在“模型坏掉时还能稳住”。
+
+---
+
+### 第 52 天学习计划
+
+第 52 天主题是：
+
+> Advanced Optimization V5（高级优化第 5 版）：Prompt Versioning & Prompt Registry（提示词版本管理与提示词注册表）
+
+今日核心目标：
+
+> 让所有 Prompt（提示词）都有版本、有来源、有评估、有回滚能力。
+
+#### 为什么第 52 天必须做
+
+现在系统已经有：
+
+| 已有能力 | 中文说明 |
+| --- | --- |
+| Model Router（模型路由器） | 按任务选择合适模型。 |
+| Fallback（备用模型） | 模型失败时自动切换备用模型。 |
+| Evaluation（评估） | 对输出质量进行评分和分析。 |
+| Regression（回归评估） | 对比新旧版本，发现质量退步。 |
+| Prompt A/B Test（提示词 A/B 测试） | 对比两套提示词的质量和成本表现。 |
+
+但如果 Prompt（提示词）还散落在代码里，例如：
+
+```ts
+const prompt = `你是一个...`;
+```
+
+会出现几个问题：
+
+1. 不知道当前用的是哪个 Prompt Version（提示词版本）。
+2. Prompt（提示词）改坏了不好 Rollback（回滚）。
+3. Evaluation（评估）没法明确比较不同版本。
+4. Usage / Trace（用量统计 / 追踪记录）里看不到 prompt version（提示词版本）。
+5. 多 Agent（智能体）、多 Tool（工具）、多 Model（模型）之后，Prompt Management（提示词管理）会混乱。
+
+所以第 52 天要做：
+
+> Prompt Registry（提示词注册表）
+
+#### 第 52 天最终效果
+
+系统执行时可以看到类似信息：
+
+```text
+Research Agent（研究智能体）
+Prompt（提示词）：research.v3
+
+Score（评分）：88
+Cost（成本）：$0.008
+Model（模型）：large-reasoning（大型推理模型）
+
+Compared with（对比版本）：research.v2
++3 score（评分提升 3 分）
++12% cost（成本增加 12%）
+```
+
+并且可以：
+
+- 切换到 v2（第 2 版）。
+- 回滚到 v1（第 1 版）。
+- 禁用 v4（第 4 版）。
+
+---
+
+### 任务 1：定义 PromptTemplate（提示词模板）
+
+`PromptTemplate`（提示词模板）用于描述一条可版本化、可渲染、可激活和可归档的 Prompt（提示词）。
+
+```ts
+type PromptTemplate = {
+  id: string;
+
+  name: string;
+
+  componentType:
+    | "agent"
+    | "tool"
+    | "reflection"
+    | "evaluation"
+    | "supervisor";
+
+  componentId: string;
+
+  version: string;
+
+  template: string;
+
+  variables: string[];
+
+  status: "draft" | "active" | "archived";
+
+  createdAt: number;
+  updatedAt: number;
+};
+```
+
+字段说明：
+
+| 字段 | 中文说明 |
+| --- | --- |
+| `id` | Prompt（提示词）的唯一标识。 |
+| `name` | Prompt（提示词）的可读名称。 |
+| `componentType` | 组件类型，例如 agent（智能体）、tool（工具）、reflection（反思）、evaluation（评估）或 supervisor（调度器）。 |
+| `componentId` | 使用该 Prompt（提示词）的组件 ID。 |
+| `version` | Prompt Version（提示词版本），例如 `v1`、`v2`、`v3`。 |
+| `template` | Prompt Template（提示词模板）正文。 |
+| `variables` | 模板变量列表。 |
+| `status` | 状态：draft（草稿）、active（启用中）、archived（已归档）。 |
+| `createdAt` | 创建时间。 |
+| `updatedAt` | 更新时间。 |
+
+---
+
+### 任务 2：实现 PromptRegistry（提示词注册表）
+
+`PromptRegistry`（提示词注册表）负责集中保存、查询、激活和归档 Prompt（提示词）。
+
+```ts
+class PromptRegistry {
+  register(prompt: PromptTemplate): void;
+
+  getActive(componentId: string): PromptTemplate | null;
+
+  getVersion(componentId: string, version: string): PromptTemplate | null;
+
+  list(componentId?: string): PromptTemplate[];
+
+  activate(componentId: string, version: string): void;
+
+  archive(componentId: string, version: string): void;
+}
+```
+
+核心能力：
+
+- `register`（注册）：登记新的 PromptTemplate（提示词模板）。
+- `getActive`（获取启用版本）：获取某个组件当前 active（启用中）的 Prompt（提示词）。
+- `getVersion`（获取指定版本）：按 componentId（组件 ID）和 version（版本）读取 Prompt（提示词）。
+- `list`（列表）：列出全部或某个组件的 Prompt（提示词）。
+- `activate`（激活）：把某个版本设为 active（启用中）。
+- `archive`（归档）：把某个版本设为 archived（已归档）。
+
+---
+
+### 任务 3：Prompt Renderer（提示词渲染器）
+
+新增：
+
+```ts
+renderPrompt(
+  template: PromptTemplate,
+  variables: Record<string, string>
+);
+```
+
+Prompt Renderer（提示词渲染器）负责把模板变量替换成真实运行时内容。
+
+支持变量：
+
+| 变量 | 中文说明 |
+| --- | --- |
+| `{{task}}` | 当前任务。 |
+| `{{memory}}` | Memory（记忆）上下文。 |
+| `{{workspace}}` | Workspace（工作空间）上下文。 |
+| `{{tools}}` | Tool（工具）列表或工具上下文。 |
+
+如果变量缺失，需要明确报错或 fallback（兜底）到安全文案，避免生成残缺 Prompt（提示词）。
+
+---
+
+### 任务 4：Agent Runtime 接入 PromptRegistry
+
+之前 Agent Runtime（智能体运行时）直接使用：
+
+```ts
+agent.systemPrompt;
+```
+
+升级为：
+
+```ts
+const promptTemplate = promptRegistry.getActive(agent.id);
+const prompt = renderPrompt(promptTemplate, variables);
+```
+
+也就是：
+
+```text
+Agent（智能体）
+→ 读取当前 active（启用中）的 PromptTemplate（提示词模板）
+→ renderPrompt（渲染提示词）
+→ 执行模型调用
+```
+
+这样 Agent（智能体）使用的 Prompt（提示词）就有了明确版本。
+
+---
+
+### 任务 5：Tool / Reflection / Evaluation 接入 PromptRegistry
+
+需要把这些 Prompt（提示词）从代码里抽出来：
+
+| Prompt（提示词） | 中文说明 |
+| --- | --- |
+| supervisor prompt（调度器提示词） | 用于生成多智能体协作计划。 |
+| reflection prompt（反思提示词） | 用于审查输出质量并提出重试建议。 |
+| evaluation prompt（评估提示词） | 用于对输出质量评分。 |
+| query rewrite prompt（查询改写提示词） | 用于把用户查询改写为更适合检索的问题。 |
+| rag prompt（检索增强生成提示词） | 用于结合检索结果回答问题。 |
+| writer prompt（写作智能体提示词） | 用于整合前置结果并生成最终回答。 |
+| critic prompt（审查智能体提示词） | 用于发现风险、漏洞和遗漏。 |
+
+目标是让 Agent（智能体）、Tool（工具）、Reflection（反思）和 Evaluation（评估）都使用 PromptRegistry（提示词注册表）管理 Prompt（提示词）。
+
+---
+
+### 任务 6：Trace / Usage / Evaluation 记录 promptVersion
+
+Trace Span Metadata（追踪跨度元数据）增加：
+
+```ts
+{
+  promptId,
+  promptVersion
+}
+```
+
+UsageRecord（用量记录）增加：
+
+```ts
+promptId?: string;
+promptVersion?: string;
+```
+
+EvaluationResult（评估结果）增加：
+
+```ts
+promptVersion?: string;
+```
+
+这样系统可以回答：
+
+- 这次调用用了哪个 Prompt（提示词）？
+- 哪个 Prompt Version（提示词版本）带来了更高评分？
+- 哪个 Prompt Version（提示词版本）成本更高？
+- 哪次 Regression（回归评估）是由 Prompt（提示词）变更引起的？
+
+---
+
+### 任务 7：Prompt Explorer（提示词浏览器）
+
+前端新增 Prompt Explorer（提示词浏览器）。
+
+展示字段：
+
+| 字段 | 中文说明 |
+| --- | --- |
+| Component（组件） | 使用该 Prompt（提示词）的组件。 |
+| Version（版本） | Prompt Version（提示词版本）。 |
+| Status（状态） | draft（草稿）、active（启用中）或 archived（已归档）。 |
+| Variables（变量） | Prompt Template（提示词模板）所需变量。 |
+| UpdatedAt（更新时间） | 最近更新时间。 |
+
+支持操作：
+
+- Activate（激活）
+- Archive（归档）
+- Compare（比较）
+
+---
+
+### 任务 8：Prompt Diff（提示词差异对比）
+
+实现简单文本 diff（差异对比）。
+
+先比较：
+
+```text
+research.v2（研究提示词第 2 版）
+research.v3（研究提示词第 3 版）
+```
+
+展示：
+
+```text
+新增：
+- 请给出来源
+
+删除：
+- 简短回答即可
+```
+
+第 52 天可以先做 line-level diff（行级差异对比），也就是按行比较新增和删除内容。
+
+---
+
+### 任务 9：Prompt Regression Link（提示词回归关联）
+
+把 Day 46 的 Regression Evaluation（回归评估）与 Prompt Version（提示词版本）关联。
+
+回归报告显示：
+
+```text
+Baseline（基线版本）：research.v2
+Candidate（候选版本）：research.v3
+Result（结果）：passed / failed（通过 / 失败）
+```
+
+这样就能明确知道：
+
+> 是哪个 Prompt Version（提示词版本）导致质量提升或退步。
+
+---
+
+### 任务 10：Prompt Rollback（提示词回滚）
+
+如果 candidate（候选版本）失败，可以执行：
+
+```ts
+promptRegistry.activate("research", "v2");
+```
+
+前端按钮：
+
+```text
+Rollback to v2（回滚到第 2 版）
+```
+
+Prompt Rollback（提示词回滚）的价值是：
+
+- 新版本 Prompt（提示词）改坏时可以快速恢复。
+- Evaluation（评估）或 Regression（回归评估）失败时可以自动或手动回退。
+- 生产系统不需要紧急改代码就能恢复旧提示词。
+
+---
+
+### 第 52 天验收标准
+
+1. 是否定义 PromptTemplate（提示词模板）。
+2. 是否实现 PromptRegistry（提示词注册表）。
+3. 是否实现 renderPrompt（渲染提示词）。
+4. Agent Runtime（智能体运行时）是否接入 PromptRegistry（提示词注册表）。
+5. Tool / Reflection / Evaluation（工具 / 反思 / 评估）是否接入 PromptRegistry（提示词注册表）。
+6. Trace / Usage / Evaluation（追踪 / 用量统计 / 评估）是否记录 promptVersion（提示词版本）。
+7. 是否实现 Prompt Explorer（提示词浏览器）。
+8. 是否实现 Prompt Diff（提示词差异对比）。
+9. Regression Evaluation（回归评估）是否关联 Prompt Version（提示词版本）。
+10. 是否支持 Prompt Rollback（提示词回滚）。
+
+---
+
+### 第 52 天打卡模板
+
+```text
+【第52天打卡】
+
+1. 是否定义 PromptTemplate（提示词模板）：是 / 否
+2. 是否实现 PromptRegistry（提示词注册表）：是 / 否
+
+3. 是否实现 renderPrompt（渲染提示词）：是 / 否
+4. Agent Runtime（智能体运行时）是否接入 PromptRegistry（提示词注册表）：是 / 否
+
+5. Tool / Reflection / Evaluation（工具 / 反思 / 评估）是否接入 PromptRegistry（提示词注册表）：是 / 否
+6. Trace / Usage / Evaluation（追踪 / 用量统计 / 评估）是否记录 promptVersion（提示词版本）：是 / 否
+
+7. 是否实现 Prompt Explorer（提示词浏览器）：是 / 否
+8. 是否实现 Prompt Diff（提示词差异对比）：是 / 否
+
+9. Regression Evaluation（回归评估）是否关联 Prompt Version（提示词版本）：是 / 否
+10. 是否支持 Prompt Rollback（提示词回滚）：是 / 否
+
+11. 遇到的最大问题：
+
+12. 当前系统能力：
+```
+
+---
+
+### 第 52 天核心认知
+
+记住一句话：
+
+> Model（模型）决定能力上限，Prompt（提示词）决定能力释放方式。
+
+完成第 52 天后，系统会升级为：
+
+> Advanced Optimization V5（高级优化第 5 版）：Prompt Lifecycle Management（提示词生命周期管理）
