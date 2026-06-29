@@ -274,3 +274,6 @@
  GET /api/queue 200 in 13ms (next.js: 3ms, application-code: 10ms)
  GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 6ms)
  GET /api/queue 200 in 14ms (next.js: 6ms, application-code: 8ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 13ms (next.js: 3ms, application-code: 9ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 8ms)
