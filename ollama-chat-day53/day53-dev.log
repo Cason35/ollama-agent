@@ -1,0 +1,1223 @@
+
+> ollama-chat-day53@0.1.0 dev
+> next dev --hostname 127.0.0.1 --port 3000
+
+▲ Next.js 16.2.4 (Turbopack)
+- Local:         http://127.0.0.1:3000
+- Network:       http://127.0.0.1:3000
+✓ Ready in 5.8s
+
+ GET /api/experiments 200 in 1137ms (next.js: 1077ms, application-code: 60ms)
+○ Compiling / ...
+ GET / 200 in 15.6s (next.js: 14.6s, application-code: 1047ms)
+ GET / 200 in 187ms (next.js: 10ms, application-code: 177ms)
+ GET /api/experiments 200 in 52ms (next.js: 32ms, application-code: 20ms)
+ GET /api/agents 200 in 1843ms (next.js: 1620ms, application-code: 223ms)
+ GET /api/cache 200 in 2.2s (next.js: 2.2s, application-code: 50ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/tools 200 in 2.5s (next.js: 2.5s, application-code: 25ms)
+ GET /api/memory 200 in 2.7s (next.js: 2.7s, application-code: 67ms)
+ GET /api/model 200 in 2.8s (next.js: 2.8s, application-code: 26ms)
+ GET /api/prompts 200 in 3.1s (next.js: 3.0s, application-code: 22ms)
+ GET /api/model 200 in 26ms (next.js: 14ms, application-code: 12ms)
+ GET /api/regression 200 in 769ms (next.js: 714ms, application-code: 55ms)
+ GET /api/usage 200 in 1058ms (next.js: 994ms, application-code: 64ms)
+ GET /api/knowledge 200 in 1285ms (next.js: 1262ms, application-code: 22ms)
+ GET /api/queue 200 in 1527ms (next.js: 1495ms, application-code: 33ms)
+ GET /api/queue 200 in 30ms (next.js: 21ms, application-code: 9ms)
+ GET /api/queue 200 in 12ms (next.js: 3ms, application-code: 9ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 19ms (next.js: 6ms, application-code: 12ms)
+ GET /api/queue 200 in 22ms (next.js: 14ms, application-code: 8ms)
+ GET /api/queue 200 in 13ms (next.js: 5ms, application-code: 9ms)
+ GET /api/queue 200 in 14ms (next.js: 4ms, application-code: 10ms)
+ GET /api/queue 200 in 13ms (next.js: 4ms, application-code: 8ms)
+ GET /api/agents 200 in 22ms (next.js: 6ms, application-code: 15ms)
+ GET /api/tools 200 in 13ms (next.js: 5ms, application-code: 8ms)
+ GET /api/queue 200 in 12ms (next.js: 4ms, application-code: 8ms)
+ GET /api/experiments 200 in 11ms (next.js: 4ms, application-code: 7ms)
+ GET /api/prompts 200 in 18ms (next.js: 8ms, application-code: 11ms)
+ GET /api/model 200 in 35ms (next.js: 22ms, application-code: 12ms)
+ GET /api/regression 200 in 61ms (next.js: 45ms, application-code: 16ms)
+ GET /api/memory 200 in 85ms (next.js: 66ms, application-code: 18ms)
+ GET /api/cache 200 in 75ms (next.js: 63ms, application-code: 13ms)
+ GET /api/usage 200 in 90ms (next.js: 77ms, application-code: 13ms)
+ GET /api/knowledge 200 in 37ms (next.js: 29ms, application-code: 8ms)
+ GET /api/model 200 in 46ms (next.js: 39ms, application-code: 7ms)
+ GET /api/queue 200 in 51ms (next.js: 11ms, application-code: 40ms)
+ GET /api/queue 200 in 25ms (next.js: 8ms, application-code: 17ms)
+ GET /api/queue 200 in 14ms (next.js: 4ms, application-code: 9ms)
+ GET /api/queue 200 in 12ms (next.js: 3ms, application-code: 9ms)
+ GET /api/queue 200 in 11ms (next.js: 4ms, application-code: 7ms)
+ GET /api/queue 200 in 12ms (next.js: 4ms, application-code: 8ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /api/queue 200 in 14ms (next.js: 5ms, application-code: 9ms)
+ GET /api/queue 200 in 13ms (next.js: 5ms, application-code: 9ms)
+ GET /api/queue 200 in 13ms (next.js: 6ms, application-code: 8ms)
+ GET /prompts 200 in 2.1s (next.js: 2000ms, application-code: 140ms)
+ GET /api/queue 200 in 30ms (next.js: 12ms, application-code: 17ms)
+ GET /api/prompts 200 in 12ms (next.js: 4ms, application-code: 8ms)
+ GET /api/prompts 200 in 13ms (next.js: 5ms, application-code: 8ms)
+ GET /api/queue 200 in 13ms (next.js: 5ms, application-code: 9ms)
+ GET /api/queue 200 in 14ms (next.js: 4ms, application-code: 9ms)
+ GET /api/queue 200 in 20ms (next.js: 12ms, application-code: 9ms)
+ GET /api/queue 200 in 15ms (next.js: 5ms, application-code: 10ms)
+ GET /api/queue 200 in 13ms (next.js: 4ms, application-code: 9ms)
+ GET /api/queue 200 in 15ms (next.js: 6ms, application-code: 9ms)
+ GET /api/queue 200 in 13ms (next.js: 4ms, application-code: 9ms)
+ GET /api/queue 200 in 14ms (next.js: 4ms, application-code: 10ms)
+ GET /api/prompts 200 in 15ms (next.js: 4ms, application-code: 11ms)
+ GET /api/queue 200 in 14ms (next.js: 5ms, application-code: 10ms)
+ GET /api/queue 200 in 14ms (next.js: 6ms, application-code: 8ms)
+ GET /api/queue 200 in 12ms (next.js: 4ms, application-code: 8ms)
+ GET /api/queue 200 in 12ms (next.js: 4ms, application-code: 8ms)
+ GET /api/queue 200 in 12ms (next.js: 3ms, application-code: 9ms)
+ GET /api/queue 200 in 10ms (next.js: 4ms, application-code: 6ms)
+ GET /api/queue 200 in 23ms (next.js: 10ms, application-code: 14ms)
+ GET /api/queue 200 in 13ms (next.js: 4ms, application-code: 9ms)
+ GET /api/queue 200 in 13ms (next.js: 4ms, application-code: 8ms)
+ GET /api/queue 200 in 11ms (next.js: 4ms, application-code: 8ms)
+ GET /api/queue 200 in 13ms (next.js: 5ms, application-code: 8ms)
+ GET /api/queue 200 in 10ms (next.js: 5ms, application-code: 5ms)
+ GET /api/queue 200 in 12ms (next.js: 4ms, application-code: 8ms)
+ GET /api/queue 200 in 11ms (next.js: 4ms, application-code: 8ms)
+ GET /api/queue 200 in 17ms (next.js: 6ms, application-code: 10ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 13ms (next.js: 6ms, application-code: 7ms)
+ GET /api/queue 200 in 13ms (next.js: 3ms, application-code: 9ms)
+ GET /api/queue 200 in 13ms (next.js: 4ms, application-code: 10ms)
+ GET /api/queue 200 in 13ms (next.js: 5ms, application-code: 8ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 24ms (next.js: 4ms, application-code: 20ms)
+ GET /api/queue 200 in 11ms (next.js: 4ms, application-code: 7ms)
+ GET /api/queue 200 in 7ms (next.js: 2ms, application-code: 5ms)
+ GET /api/queue 200 in 7ms (next.js: 2ms, application-code: 5ms)
+ GET /api/queue 200 in 14ms (next.js: 6ms, application-code: 8ms)
+ GET /api/queue 200 in 9ms (next.js: 5ms, application-code: 5ms)
+ GET /api/prompts 200 in 10ms (next.js: 4ms, application-code: 6ms)
+ GET /api/prompts 200 in 7ms (next.js: 3ms, application-code: 5ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ PATCH /api/prompts 200 in 11ms (next.js: 1988µs, application-code: 9ms)
+ GET /api/prompts 200 in 5ms (next.js: 1940µs, application-code: 3ms)
+ PATCH /api/prompts 200 in 9ms (next.js: 4ms, application-code: 5ms)
+ GET /api/prompts 200 in 6ms (next.js: 2ms, application-code: 4ms)
+ PATCH /api/prompts 200 in 7ms (next.js: 2ms, application-code: 5ms)
+ GET /api/prompts 200 in 6ms (next.js: 1926µs, application-code: 5ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/queue 200 in 6ms (next.js: 1903µs, application-code: 5ms)
+ GET /api/queue 200 in 6ms (next.js: 2ms, application-code: 4ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/prompts 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/prompts 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/prompts 200 in 13ms (next.js: 6ms, application-code: 6ms)
+ GET /api/prompts 200 in 18ms (next.js: 8ms, application-code: 10ms)
+ GET /api/prompts 200 in 12ms (next.js: 5ms, application-code: 7ms)
+ GET /api/prompts 200 in 17ms (next.js: 9ms, application-code: 8ms)
+ GET /api/prompts 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /api/prompts 200 in 7ms (next.js: 3ms, application-code: 5ms)
+ GET /api/prompts 200 in 7ms (next.js: 2ms, application-code: 5ms)
+ GET /api/prompts 200 in 12ms (next.js: 4ms, application-code: 8ms)
+ GET /api/prompts 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/prompts 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/prompts 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/prompts 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /api/prompts 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /api/prompts 200 in 10ms (next.js: 3ms, application-code: 6ms)
+ GET /api/prompts 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/prompts 200 in 10ms (next.js: 3ms, application-code: 6ms)
+ GET /api/prompts 200 in 8ms (next.js: 2ms, application-code: 5ms)
+ GET /api/queue 200 in 13ms (next.js: 5ms, application-code: 8ms)
+ PATCH /api/prompts 200 in 7ms (next.js: 2ms, application-code: 5ms)
+ GET /api/prompts 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /api/prompts 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/queue 200 in 10ms (next.js: 4ms, application-code: 7ms)
+ PATCH /api/prompts 200 in 8ms (next.js: 4ms, application-code: 4ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/prompts 200 in 8ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 8ms (next.js: 2ms, application-code: 5ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 11ms (next.js: 5ms, application-code: 6ms)
+ GET /api/queue 200 in 13ms (next.js: 4ms, application-code: 8ms)
+ GET / 200 in 527ms (next.js: 311ms, application-code: 215ms)
+ GET /prompts 200 in 634ms (next.js: 152ms, application-code: 482ms)
+ GET /prompts 200 in 270ms (next.js: 11ms, application-code: 260ms)
+ GET / 200 in 207ms (next.js: 12ms, application-code: 195ms)
+ GET / 200 in 127ms (next.js: 12ms, application-code: 115ms)
+ GET /prompts 200 in 133ms (next.js: 59ms, application-code: 74ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 106ms (next.js: 80ms, application-code: 25ms)
+ GET /api/queue 200 in 18ms (next.js: 3ms, application-code: 15ms)
+ GET /api/queue 200 in 16ms (next.js: 4ms, application-code: 12ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 5ms)
+✓ Compiled in 168ms
+ GET /api/prompts 200 in 160ms (next.js: 137ms, application-code: 23ms)
+ GET /prompts 200 in 307ms (next.js: 85ms, application-code: 223ms)
+ GET / 200 in 169ms (next.js: 32ms, application-code: 138ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 34ms (next.js: 29ms, application-code: 5ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+✓ Compiled in 113ms
+ GET /api/prompts 200 in 137ms (next.js: 124ms, application-code: 14ms)
+ GET /prompts 200 in 301ms (next.js: 104ms, application-code: 197ms)
+ GET / 200 in 146ms (next.js: 21ms, application-code: 125ms)
+ GET /api/prompts 200 in 15ms (next.js: 7ms, application-code: 8ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 57ms (next.js: 40ms, application-code: 17ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+✓ Compiled in 97ms
+ GET / 200 in 113ms (next.js: 63ms, application-code: 50ms)
+ GET /api/prompts 200 in 282ms (next.js: 83ms, application-code: 199ms)
+ GET /prompts 200 in 297ms (next.js: 226ms, application-code: 71ms)
+ GET /api/prompts 200 in 12ms (next.js: 4ms, application-code: 8ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 43ms (next.js: 33ms, application-code: 10ms)
+ GET /api/queue 200 in 12ms (next.js: 3ms, application-code: 8ms)
+ GET /api/queue 200 in 12ms (next.js: 5ms, application-code: 7ms)
+✓ Compiled in 114ms
+ GET /api/prompts 200 in 142ms (next.js: 68ms, application-code: 75ms)
+ GET /prompts 200 in 345ms (next.js: 124ms, application-code: 222ms)
+ GET / 200 in 152ms (next.js: 90ms, application-code: 62ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 58ms (next.js: 34ms, application-code: 24ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+✓ Compiled in 188ms
+ GET /api/prompts 200 in 60ms (next.js: 47ms, application-code: 13ms)
+ GET / 200 in 376ms (next.js: 75ms, application-code: 301ms)
+ GET /prompts 200 in 377ms (next.js: 249ms, application-code: 128ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 47ms (next.js: 37ms, application-code: 11ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 12ms (next.js: 4ms, application-code: 8ms)
+ GET /api/queue 200 in 12ms (next.js: 4ms, application-code: 8ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/queue 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 15ms (next.js: 5ms, application-code: 10ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 18ms (next.js: 6ms, application-code: 12ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/queue 200 in 23ms (next.js: 4ms, application-code: 19ms)
+ GET /api/prompts 200 in 12ms (next.js: 4ms, application-code: 8ms)
+ GET /api/prompts 200 in 11ms (next.js: 4ms, application-code: 7ms)
+ PUT /api/prompts 200 in 17ms (next.js: 3ms, application-code: 14ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 12ms (next.js: 4ms, application-code: 9ms)
+✓ Compiled in 435ms
+ GET / 200 in 117ms (next.js: 55ms, application-code: 63ms)
+ GET /api/prompts 200 in 73ms (next.js: 51ms, application-code: 22ms)
+ GET /prompts 200 in 361ms (next.js: 190ms, application-code: 171ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 50ms (next.js: 40ms, application-code: 10ms)
+ GET /api/queue 200 in 9ms (next.js: 2ms, application-code: 6ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /api/queue 200 in 15ms (next.js: 7ms, application-code: 8ms)
+ GET /api/queue 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/queue 200 in 12ms (next.js: 5ms, application-code: 7ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 12ms (next.js: 3ms, application-code: 8ms)
+ GET /api/queue 200 in 12ms (next.js: 5ms, application-code: 7ms)
+ GET /api/queue 200 in 10ms (next.js: 4ms, application-code: 7ms)
+ GET /api/queue 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/queue 200 in 8ms (next.js: 2ms, application-code: 5ms)
+ GET /api/queue 200 in 6ms (next.js: 2ms, application-code: 4ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 6ms (next.js: 1893µs, application-code: 4ms)
+ GET /api/queue 200 in 6ms (next.js: 1999µs, application-code: 4ms)
+ GET /api/queue 200 in 7ms (next.js: 2ms, application-code: 5ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 10ms (next.js: 4ms, application-code: 5ms)
+ GET /api/queue 200 in 9ms (next.js: 2ms, application-code: 7ms)
+ GET /api/queue 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/queue 200 in 9ms (next.js: 4ms, application-code: 6ms)
+ GET /api/queue 200 in 6ms (next.js: 2ms, application-code: 4ms)
+ GET /api/queue 200 in 7ms (next.js: 3ms, application-code: 5ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 5ms)
+ PUT /api/prompts 500 in 41ms (next.js: 14ms, application-code: 27ms)
+ PUT /api/prompts 200 in 9ms (next.js: 2ms, application-code: 7ms)
+ PUT /api/prompts 500 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 7ms (next.js: 4ms, application-code: 3ms)
+ GET /api/queue 200 in 6ms (next.js: 2ms, application-code: 4ms)
+ GET /api/prompts 500 in 6ms (next.js: 2ms, application-code: 4ms)
+ POST /api/prompts 200 in 13ms (next.js: 3ms, application-code: 11ms)
+ GET /api/prompts 200 in 6ms (next.js: 2ms, application-code: 4ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 18ms (next.js: 10ms, application-code: 8ms)
+ GET /api/prompts 200 in 10ms (next.js: 3ms, application-code: 7ms)
+✓ Compiled in 769ms
+ GET /api/prompts 200 in 771ms (next.js: 404ms, application-code: 367ms)
+ GET / 200 in 3.5s (next.js: 1474ms, application-code: 1993ms)
+ GET /prompts 200 in 3.5s (next.js: 2.4s, application-code: 1123ms)
+ GET / 200 in 1094ms (next.js: 7ms, application-code: 1087ms)
+ GET /prompts 200 in 1189ms (next.js: 80ms, application-code: 1109ms)
+ GET / 200 in 618ms (next.js: 11ms, application-code: 607ms)
+ GET / 200 in 628ms (next.js: 109ms, application-code: 519ms)
+ GET / 200 in 631ms (next.js: 57ms, application-code: 574ms)
+ GET / 200 in 640ms (next.js: 224ms, application-code: 416ms)
+ GET /prompts 200 in 812ms (next.js: 162ms, application-code: 650ms)
+ GET /prompts 200 in 815ms (next.js: 274ms, application-code: 542ms)
+ GET /prompts 200 in 671ms (next.js: 209ms, application-code: 462ms)
+ GET / 200 in 581ms (next.js: 75ms, application-code: 506ms)
+ GET /prompts 200 in 585ms (next.js: 10ms, application-code: 575ms)
+ GET / 200 in 425ms (next.js: 29ms, application-code: 396ms)
+ GET /prompts 200 in 431ms (next.js: 81ms, application-code: 350ms)
+ GET /prompts 200 in 408ms (next.js: 122ms, application-code: 286ms)
+ GET / 200 in 221ms (next.js: 16ms, application-code: 205ms)
+ GET / 200 in 228ms (next.js: 73ms, application-code: 155ms)
+ GET / 200 in 228ms (next.js: 143ms, application-code: 85ms)
+ GET /prompts 200 in 272ms (next.js: 116ms, application-code: 156ms)
+ GET /prompts 200 in 276ms (next.js: 37ms, application-code: 240ms)
+ GET /prompts 200 in 278ms (next.js: 180ms, application-code: 98ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 661ms (next.js: 632ms, application-code: 30ms)
+ GET /api/queue 200 in 11ms (next.js: 4ms, application-code: 7ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 13ms (next.js: 5ms, application-code: 8ms)
+ GET /prompts 200 in 204ms (next.js: 65ms, application-code: 139ms)
+ GET / 200 in 77ms (next.js: 14ms, application-code: 63ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 77ms (next.js: 57ms, application-code: 19ms)
+ GET /api/queue 200 in 14ms (next.js: 6ms, application-code: 8ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+✓ Compiled in 153ms
+ GET / 200 in 131ms (next.js: 71ms, application-code: 60ms)
+ GET /prompts 200 in 281ms (next.js: 178ms, application-code: 103ms)
+ GET /api/prompts 200 in 188ms (next.js: 159ms, application-code: 29ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 74ms (next.js: 50ms, application-code: 24ms)
+ GET /api/queue 200 in 12ms (next.js: 3ms, application-code: 9ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+✓ Compiled in 240ms
+ GET / 200 in 356ms (next.js: 52ms, application-code: 304ms)
+ GET /prompts 200 in 240ms (next.js: 167ms, application-code: 72ms)
+ GET /api/prompts 200 in 53ms (next.js: 41ms, application-code: 12ms)
+ GET /api/prompts 200 in 15ms (next.js: 7ms, application-code: 8ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 49ms (next.js: 41ms, application-code: 8ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /api/queue 200 in 14ms (next.js: 8ms, application-code: 6ms)
+✓ Compiled in 265ms
+ GET /prompts 200 in 301ms (next.js: 114ms, application-code: 187ms)
+ GET / 200 in 101ms (next.js: 40ms, application-code: 61ms)
+ GET /api/prompts 200 in 55ms (next.js: 43ms, application-code: 13ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 48ms (next.js: 39ms, application-code: 10ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 8ms)
+✓ Compiled in 207ms
+ GET /api/prompts 200 in 133ms (next.js: 51ms, application-code: 82ms)
+ GET /prompts 200 in 309ms (next.js: 114ms, application-code: 194ms)
+ GET / 200 in 141ms (next.js: 70ms, application-code: 71ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 49ms (next.js: 38ms, application-code: 11ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 14ms (next.js: 6ms, application-code: 8ms)
+✓ Compiled in 390ms
+ GET /api/prompts 200 in 98ms (next.js: 80ms, application-code: 18ms)
+ GET / 200 in 420ms (next.js: 250ms, application-code: 170ms)
+ GET /prompts 200 in 425ms (next.js: 170ms, application-code: 255ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 53ms (next.js: 43ms, application-code: 10ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 12ms (next.js: 4ms, application-code: 9ms)
+ GET /api/queue 200 in 17ms (next.js: 10ms, application-code: 7ms)
+✓ Compiled in 164ms
+ GET /api/prompts 200 in 59ms (next.js: 40ms, application-code: 20ms)
+ GET /prompts 200 in 318ms (next.js: 131ms, application-code: 187ms)
+ GET / 200 in 130ms (next.js: 22ms, application-code: 107ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 54ms (next.js: 43ms, application-code: 11ms)
+ GET /api/queue 200 in 68ms (next.js: 52ms, application-code: 16ms)
+ GET /api/queue 200 in 12ms (next.js: 3ms, application-code: 9ms)
+✓ Compiled in 164ms
+ GET / 200 in 120ms (next.js: 51ms, application-code: 69ms)
+ GET /prompts 200 in 215ms (next.js: 137ms, application-code: 78ms)
+ GET /api/prompts 200 in 83ms (next.js: 57ms, application-code: 25ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 99ms (next.js: 41ms, application-code: 58ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /api/queue 200 in 12ms (next.js: 4ms, application-code: 8ms)
+✓ Compiled in 496ms
+ GET / 200 in 184ms (next.js: 52ms, application-code: 132ms)
+ GET /prompts 200 in 175ms (next.js: 118ms, application-code: 57ms)
+ GET /api/prompts 200 in 55ms (next.js: 42ms, application-code: 13ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/queue 200 in 107ms (next.js: 91ms, application-code: 16ms)
+ GET /api/queue 200 in 10ms (next.js: 4ms, application-code: 6ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /prompts 200 in 769ms (next.js: 5ms, application-code: 765ms)
+ GET /api/prompts 200 in 17ms (next.js: 9ms, application-code: 8ms)
+ GET /api/prompts 200 in 12ms (next.js: 4ms, application-code: 8ms)
+ GET /api/queue 200 in 18ms (next.js: 9ms, application-code: 9ms)
+ GET /api/queue 200 in 13ms (next.js: 4ms, application-code: 9ms)
+ GET /prompts 200 in 117ms (next.js: 5ms, application-code: 112ms)
+ GET /api/prompts 200 in 14ms (next.js: 4ms, application-code: 9ms)
+ GET /api/prompts 200 in 11ms (next.js: 4ms, application-code: 7ms)
+ GET /api/queue 200 in 11ms (next.js: 4ms, application-code: 7ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /prompts 200 in 54ms (next.js: 3ms, application-code: 51ms)
+ GET /api/queue 200 in 15ms (next.js: 6ms, application-code: 9ms)
+ GET /prompts 200 in 90ms (next.js: 7ms, application-code: 84ms)
+ GET /api/prompts 200 in 35ms (next.js: 20ms, application-code: 15ms)
+ GET /api/prompts 200 in 13ms (next.js: 4ms, application-code: 9ms)
+ GET /prompts 200 in 79ms (next.js: 4ms, application-code: 75ms)
+ GET /api/prompts 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/prompts 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /api/queue 200 in 14ms (next.js: 5ms, application-code: 9ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 10ms (next.js: 4ms, application-code: 7ms)
+ GET /api/queue 200 in 7ms (next.js: 2ms, application-code: 5ms)
+ GET /api/queue 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/queue 200 in 10ms (next.js: 4ms, application-code: 6ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 8ms)
+ GET /api/queue 200 in 12ms (next.js: 4ms, application-code: 8ms)
+ GET /api/queue 200 in 18ms (next.js: 8ms, application-code: 10ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /api/queue 200 in 8ms (next.js: 4ms, application-code: 5ms)
+ GET /api/queue 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/queue 200 in 9ms (next.js: 2ms, application-code: 7ms)
+ GET /api/queue 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/queue 200 in 18ms (next.js: 3ms, application-code: 16ms)
+ GET /api/queue 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/queue 200 in 6ms (next.js: 2ms, application-code: 4ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/queue 200 in 7ms (next.js: 2ms, application-code: 5ms)
+ GET /api/queue 200 in 10ms (next.js: 5ms, application-code: 6ms)
+ GET /api/queue 200 in 7ms (next.js: 2ms, application-code: 5ms)
+ GET /api/queue 200 in 9ms (next.js: 4ms, application-code: 5ms)
+ GET /api/queue 200 in 8ms (next.js: 2ms, application-code: 5ms)
+ GET /api/queue 200 in 6ms (next.js: 2ms, application-code: 3ms)
+ GET /api/queue 200 in 7ms (next.js: 3ms, application-code: 5ms)
+ GET /api/queue 200 in 8ms (next.js: 2ms, application-code: 6ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 10ms (next.js: 4ms, application-code: 7ms)
+ GET /api/queue 200 in 11ms (next.js: 3ms, application-code: 9ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 9ms (next.js: 2ms, application-code: 7ms)
+ GET /api/queue 200 in 9ms (next.js: 4ms, application-code: 6ms)
+ GET /api/queue 200 in 7ms (next.js: 3ms, application-code: 4ms)
+ GET /api/queue 200 in 8ms (next.js: 2ms, application-code: 6ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/queue 200 in 9ms (next.js: 4ms, application-code: 5ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 8ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 4ms)
+ GET /api/queue 200 in 6ms (next.js: 2ms, application-code: 4ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 6ms (next.js: 1920µs, application-code: 4ms)
+ GET /api/queue 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/queue 200 in 10ms (next.js: 4ms, application-code: 6ms)
+ GET /api/queue 200 in 9ms (next.js: 3ms, application-code: 6ms)
+ GET /api/queue 200 in 9ms (next.js: 4ms, application-code: 5ms)
+ GET /api/queue 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /prompts 200 in 46ms (next.js: 4ms, application-code: 41ms)
+ GET /api/prompts 200 in 8ms (next.js: 3ms, application-code: 5ms)
+ GET /api/prompts 200 in 7ms (next.js: 1996µs, application-code: 5ms)
+✓ Compiled in 778ms
+ GET /prompts 200 in 528ms (next.js: 343ms, application-code: 185ms)
+ GET /api/prompts 200 in 122ms (next.js: 86ms, application-code: 35ms)
+ GET /prompts 200 in 284ms (next.js: 6ms, application-code: 278ms)
+ GET /api/prompts 200 in 18ms (next.js: 6ms, application-code: 12ms)
+ GET /api/prompts 200 in 15ms (next.js: 4ms, application-code: 11ms)
+ PUT /api/prompts 200 in 17ms (next.js: 3ms, application-code: 14ms)
+ PUT /api/prompts 200 in 19ms (next.js: 5ms, application-code: 14ms)
+ GET /api/prompts 200 in 14ms (next.js: 6ms, application-code: 8ms)
+ PUT /api/prompts 200 in 17ms (next.js: 3ms, application-code: 14ms)
+ GET /prompts 200 in 2.4s (next.js: 1931ms, application-code: 441ms)
+✓ Compiled in 787ms
+ GET /prompts 200 in 210ms (next.js: 99ms, application-code: 111ms)
+ GET /prompts 200 in 118ms (next.js: 55ms, application-code: 63ms)
+ GET /experiments 200 in 2.3s (next.js: 2.1s, application-code: 179ms)
+ GET /api/experiments 200 in 491ms (next.js: 424ms, application-code: 67ms)
+[browser] In HTML, whitespace text nodes cannot be a child of <table>. Make sure you don't have any extra whitespace between tags on each line of your source code.
+This will cause a hydration error.
+
+  ...
+    <LoadingBoundary name="experiments/" loading={null}>
+      <HTTPAccessFallbackBoundary notFound={undefined} forbidden={undefined} unauthorized={undefined}>
+        <RedirectBoundary>
+          <RedirectErrorBoundary router={{...}}>
+            <InnerLayoutRouter url="/experiments" tree={[...]} params={{}} cacheNode={{rsc:{...}, ...}} ...>
+              <SegmentViewNode type="page" pagePath="experiment...">
+                <SegmentTrieNode>
+                <ExperimentsPage>
+                  <main className="min-h-scre...">
+                    <div className="mx-auto ma...">
+                      <PromptExperimentDashboard>
+                        <section className="shrink-0 b...">
+                          <div>
+                          <div>
+                          <div>
+                          <CaseComparisonTable snapshot={{...}}>
+                            <div className="mt-3 space...">
+                              <div>
+                              <div>
+                              <div className="overflow-x...">
+>                               <table className="min-w-[58rem] w-full border-collapse text-left text-xs">
+>                                 {" "}
+                                  ...
+                                ...
+                              ...
+                          ...
+                      ...
+                    ...
+              ...
+            ...
+ 
+[browser] In HTML, whitespace text nodes cannot be a child of <thead>. Make sure you don't have any extra whitespace between tags on each line of your source code.
+This will cause a hydration error.
+
+  ...
+    <HTTPAccessFallbackBoundary notFound={undefined} forbidden={undefined} unauthorized={undefined}>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/experiments" tree={[...]} params={{}} cacheNode={{rsc:{...}, ...}} segmentPath={[...]} ...>
+            <SegmentViewNode type="page" pagePath="experiment...">
+              <SegmentTrieNode>
+              <ExperimentsPage>
+                <main className="min-h-scre...">
+                  <div className="mx-auto ma...">
+                    <PromptExperimentDashboard>
+                      <section className="shrink-0 b...">
+                        <div>
+                        <div>
+                        <div>
+                        <CaseComparisonTable snapshot={{...}}>
+                          <div className="mt-3 space...">
+                            <div>
+                            <div>
+                            <div className="overflow-x...">
+                              <table className="min-w-[58r...">
+>                               <thead
+>                                 className="bg-zinc-50 text-[10px] uppercase text-zinc-500 dark:bg-zinc-900 dark:text..."
+>                               >
+>                                 {" "}
+                                  ...
+                                ...
+                              ...
+                            ...
+                        ...
+                    ...
+                  ...
+            ...
+          ...
+ 
+[browser] In HTML, whitespace text nodes cannot be a child of <tr>. Make sure you don't have any extra whitespace between tags on each line of your source code.
+This will cause a hydration error.
+
+  ...
+    <RedirectBoundary>
+      <RedirectErrorBoundary router={{...}}>
+        <InnerLayoutRouter url="/experiments" tree={[...]} params={{}} cacheNode={{rsc:{...}, ...}} segmentPath={[...]} ...>
+          <SegmentViewNode type="page" pagePath="experiment...">
+            <SegmentTrieNode>
+            <ExperimentsPage>
+              <main className="min-h-scre...">
+                <div className="mx-auto ma...">
+                  <PromptExperimentDashboard>
+                    <section className="shrink-0 b...">
+                      <div>
+                      <div>
+                      <div>
+                      <CaseComparisonTable snapshot={{...}}>
+                        <div className="mt-3 space...">
+                          <div>
+                          <div>
+                          <div className="overflow-x...">
+                            <table className="min-w-[58r...">
+                              <thead className="bg-zinc-50...">
+>                               <tr>
+>                                 {" "}
+                                  ...
+                                ...
+                              ...
+                            ...
+                          ...
+                      ...
+                  ...
+                ...
+          ...
+        ...
+ 
+[browser] In HTML, whitespace text nodes cannot be a child of <tbody>. Make sure you don't have any extra whitespace between tags on each line of your source code.
+This will cause a hydration error.
+
+  ...
+    <HTTPAccessFallbackBoundary notFound={undefined} forbidden={undefined} unauthorized={undefined}>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/experiments" tree={[...]} params={{}} cacheNode={{rsc:{...}, ...}} segmentPath={[...]} ...>
+            <SegmentViewNode type="page" pagePath="experiment...">
+              <SegmentTrieNode>
+              <ExperimentsPage>
+                <main className="min-h-scre...">
+                  <div className="mx-auto ma...">
+                    <PromptExperimentDashboard>
+                      <section className="shrink-0 b...">
+                        <div>
+                        <div>
+                        <div>
+                        <CaseComparisonTable snapshot={{...}}>
+                          <div className="mt-3 space...">
+                            <div>
+                            <div>
+                            <div className="overflow-x...">
+                              <table className="min-w-[58r...">
+                                <thead>
+>                               <tbody>
+>                                 {" "}
+                                  ...
+                                ...
+                              ...
+                            ...
+                        ...
+                    ...
+                  ...
+            ...
+          ...
+ 
+ GET /api/prompts 200 in 679ms (next.js: 627ms, application-code: 51ms)
+ PATCH /api/prompts 200 in 22ms (next.js: 4ms, application-code: 17ms)
+ GET /api/prompts 200 in 14ms (next.js: 4ms, application-code: 10ms)
+ GET /api/prompts 200 in 12ms (next.js: 3ms, application-code: 8ms)
+ GET /api/prompts 200 in 26ms (next.js: 9ms, application-code: 17ms)
+ GET /api/prompts 200 in 24ms (next.js: 8ms, application-code: 16ms)
+ GET /api/prompts 200 in 17ms (next.js: 9ms, application-code: 9ms)
+ GET /api/prompts 200 in 23ms (next.js: 10ms, application-code: 13ms)
+ GET /api/prompts 200 in 15ms (next.js: 6ms, application-code: 9ms)
+ GET / 200 in 733ms (next.js: 622ms, application-code: 111ms)
+ GET /api/prompts 200 in 35ms (next.js: 8ms, application-code: 26ms)
+ GET /api/experiments 200 in 61ms (next.js: 42ms, application-code: 18ms)
+[ToolRegistry] register weather
+[ToolRegistry] register summary
+[ToolRegistry] register todo
+[ToolRegistry] register judge
+[ToolRegistry] register chat
+[ToolRegistry] register research
+[ToolRegistry] register note
+[ToolRegistry] register searchHistory
+[ToolRegistry] register generatePlan
+[ToolRegistry] register critic
+[ToolRegistry] register queryRewrite
+[ToolRegistry] register retrieval
+[ToolRegistry] register ragAnswer
+[ToolRegistry] register reindexKnowledge
+ GET /api/tools 200 in 672ms (next.js: 640ms, application-code: 32ms)
+ GET /api/agents 200 in 1732ms (next.js: 1670ms, application-code: 61ms)
+ GET /api/cache 200 in 2.2s (next.js: 2.1s, application-code: 66ms)
+ GET /api/queue 200 in 2.2s (next.js: 1084ms, application-code: 1121ms)
+ GET /api/tools 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /api/model 200 in 376ms (next.js: 345ms, application-code: 31ms)
+ GET /api/memory 200 in 1029ms (next.js: 957ms, application-code: 72ms)
+ GET /api/usage 200 in 1715ms (next.js: 1638ms, application-code: 77ms)
+ GET /api/regression 200 in 3.2s (next.js: 3.1s, application-code: 94ms)
+ GET /api/knowledge 200 in 3.2s (next.js: 2.4s, application-code: 847ms)
+ GET /api/model 200 in 18ms (next.js: 9ms, application-code: 8ms)
+ POST /api/experiments 200 in 64ms (next.js: 34ms, application-code: 30ms)
+ GET /api/agents 200 in 105ms (next.js: 73ms, application-code: 32ms)
+ GET /api/queue 200 in 107ms (next.js: 22ms, application-code: 85ms)
+ GET /api/queue 200 in 26ms (next.js: 17ms, application-code: 9ms)
+ GET /api/queue 200 in 15ms (next.js: 6ms, application-code: 9ms)
+ GET /api/queue 200 in 13ms (next.js: 3ms, application-code: 10ms)
+ GET /api/queue 200 in 12ms (next.js: 3ms, application-code: 9ms)
+ GET /api/queue 200 in 12ms (next.js: 3ms, application-code: 9ms)
+ GET /api/queue 200 in 14ms (next.js: 4ms, application-code: 10ms)
+ GET /api/queue 200 in 11ms (next.js: 4ms, application-code: 7ms)
+ GET /api/queue 200 in 13ms (next.js: 3ms, application-code: 10ms)
+ GET /api/queue 200 in 15ms (next.js: 6ms, application-code: 9ms)
+ GET /api/queue 200 in 15ms (next.js: 4ms, application-code: 11ms)
+ POST /api/experiments 200 in 47ms (next.js: 24ms, application-code: 23ms)
+ GET /api/queue 200 in 12ms (next.js: 4ms, application-code: 8ms)
+ GET /api/queue 200 in 10ms (next.js: 4ms, application-code: 6ms)
+ GET /api/queue 200 in 15ms (next.js: 5ms, application-code: 10ms)
+ GET /api/queue 200 in 12ms (next.js: 5ms, application-code: 7ms)
+ GET /api/queue 200 in 19ms (next.js: 11ms, application-code: 8ms)
+ GET /api/queue 200 in 12ms (next.js: 5ms, application-code: 7ms)
+ GET /api/queue 200 in 12ms (next.js: 5ms, application-code: 7ms)
+ GET /api/queue 200 in 11ms (next.js: 4ms, application-code: 7ms)
+ GET /experiments 200 in 62ms (next.js: 15ms, application-code: 47ms)
+ GET /api/experiments 200 in 13ms (next.js: 5ms, application-code: 8ms)
+[browser] In HTML, whitespace text nodes cannot be a child of <table>. Make sure you don't have any extra whitespace between tags on each line of your source code.
+This will cause a hydration error.
+
+  ...
+    <LoadingBoundary name="experiments/" loading={null}>
+      <HTTPAccessFallbackBoundary notFound={undefined} forbidden={undefined} unauthorized={undefined}>
+        <RedirectBoundary>
+          <RedirectErrorBoundary router={{...}}>
+            <InnerLayoutRouter url="/experiments" tree={[...]} params={{}} cacheNode={{rsc:<Fragment>, ...}} ...>
+              <SegmentViewNode type="page" pagePath="experiment...">
+                <SegmentTrieNode>
+                <ExperimentsPage>
+                  <main className="min-h-scre...">
+                    <div className="mx-auto ma...">
+                      <PromptExperimentDashboard>
+                        <section className="shrink-0 b...">
+                          <div>
+                          <div>
+                          <div>
+                          <CaseComparisonTable snapshot={{...}}>
+                            <div className="mt-3 space...">
+                              <div>
+                              <div>
+                              <div className="overflow-x...">
+>                               <table className="min-w-[58rem] w-full border-collapse text-left text-xs">
+>                                 {" "}
+                                  ...
+                                ...
+                              ...
+                          ...
+                      ...
+                    ...
+              ...
+            ...
+ 
+[browser] In HTML, whitespace text nodes cannot be a child of <thead>. Make sure you don't have any extra whitespace between tags on each line of your source code.
+This will cause a hydration error.
+
+  ...
+    <HTTPAccessFallbackBoundary notFound={undefined} forbidden={undefined} unauthorized={undefined}>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/experiments" tree={[...]} params={{}} cacheNode={{rsc:<Fragment>, ...}} ...>
+            <SegmentViewNode type="page" pagePath="experiment...">
+              <SegmentTrieNode>
+              <ExperimentsPage>
+                <main className="min-h-scre...">
+                  <div className="mx-auto ma...">
+                    <PromptExperimentDashboard>
+                      <section className="shrink-0 b...">
+                        <div>
+                        <div>
+                        <div>
+                        <CaseComparisonTable snapshot={{...}}>
+                          <div className="mt-3 space...">
+                            <div>
+                            <div>
+                            <div className="overflow-x...">
+                              <table className="min-w-[58r...">
+>                               <thead
+>                                 className="bg-zinc-50 text-[10px] uppercase text-zinc-500 dark:bg-zinc-900 dark:text..."
+>                               >
+>                                 {" "}
+                                  ...
+                                ...
+                              ...
+                            ...
+                        ...
+                    ...
+                  ...
+            ...
+          ...
+ 
+[browser] In HTML, whitespace text nodes cannot be a child of <tr>. Make sure you don't have any extra whitespace between tags on each line of your source code.
+This will cause a hydration error.
+
+  ...
+    <RedirectBoundary>
+      <RedirectErrorBoundary router={{...}}>
+        <InnerLayoutRouter url="/experiments" tree={[...]} params={{}} cacheNode={{rsc:<Fragment>, ...}} ...>
+          <SegmentViewNode type="page" pagePath="experiment...">
+            <SegmentTrieNode>
+            <ExperimentsPage>
+              <main className="min-h-scre...">
+                <div className="mx-auto ma...">
+                  <PromptExperimentDashboard>
+                    <section className="shrink-0 b...">
+                      <div>
+                      <div>
+                      <div>
+                      <CaseComparisonTable snapshot={{...}}>
+                        <div className="mt-3 space...">
+                          <div>
+                          <div>
+                          <div className="overflow-x...">
+                            <table className="min-w-[58r...">
+                              <thead className="bg-zinc-50...">
+>                               <tr>
+>                                 {" "}
+                                  ...
+                                ...
+                              ...
+                            ...
+                          ...
+                      ...
+                  ...
+                ...
+          ...
+        ...
+ 
+[browser] In HTML, whitespace text nodes cannot be a child of <tbody>. Make sure you don't have any extra whitespace between tags on each line of your source code.
+This will cause a hydration error.
+
+  ...
+    <HTTPAccessFallbackBoundary notFound={undefined} forbidden={undefined} unauthorized={undefined}>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/experiments" tree={[...]} params={{}} cacheNode={{rsc:<Fragment>, ...}} ...>
+            <SegmentViewNode type="page" pagePath="experiment...">
+              <SegmentTrieNode>
+              <ExperimentsPage>
+                <main className="min-h-scre...">
+                  <div className="mx-auto ma...">
+                    <PromptExperimentDashboard>
+                      <section className="shrink-0 b...">
+                        <div>
+                        <div>
+                        <div>
+                        <CaseComparisonTable snapshot={{...}}>
+                          <div className="mt-3 space...">
+                            <div>
+                            <div>
+                            <div className="overflow-x...">
+                              <table className="min-w-[58r...">
+                                <thead>
+>                               <tbody>
+>                                 {" "}
+                                  ...
+                                ...
+                              ...
+                            ...
+                        ...
+                    ...
+                  ...
+            ...
+          ...
+ 
+ GET /experiments 200 in 139ms (next.js: 6ms, application-code: 133ms)
+ GET /experiments 200 in 229ms (next.js: 7ms, application-code: 222ms)
+ GET /api/experiments 200 in 14ms (next.js: 6ms, application-code: 8ms)
+[browser] In HTML, whitespace text nodes cannot be a child of <table>. Make sure you don't have any extra whitespace between tags on each line of your source code.
+This will cause a hydration error.
+
+  ...
+    <LoadingBoundary name="experiments/" loading={null}>
+      <HTTPAccessFallbackBoundary notFound={undefined} forbidden={undefined} unauthorized={undefined}>
+        <RedirectBoundary>
+          <RedirectErrorBoundary router={{...}}>
+            <InnerLayoutRouter url="/experiments" tree={[...]} params={{}} cacheNode={{rsc:{...}, ...}} ...>
+              <SegmentViewNode type="page" pagePath="experiment...">
+                <SegmentTrieNode>
+                <ExperimentsPage>
+                  <main className="min-h-scre...">
+                    <div className="mx-auto ma...">
+                      <PromptExperimentDashboard>
+                        <section className="shrink-0 b...">
+                          <div>
+                          <div>
+                          <div>
+                          <CaseComparisonTable snapshot={{...}}>
+                            <div className="mt-3 space...">
+                              <div>
+                              <div>
+                              <div className="overflow-x...">
+>                               <table className="min-w-[58rem] w-full border-collapse text-left text-xs">
+>                                 {" "}
+                                  ...
+                                ...
+                              ...
+                          ...
+                      ...
+                    ...
+              ...
+            ...
+ 
+[browser] In HTML, whitespace text nodes cannot be a child of <thead>. Make sure you don't have any extra whitespace between tags on each line of your source code.
+This will cause a hydration error.
+
+  ...
+    <HTTPAccessFallbackBoundary notFound={undefined} forbidden={undefined} unauthorized={undefined}>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/experiments" tree={[...]} params={{}} cacheNode={{rsc:{...}, ...}} segmentPath={[...]} ...>
+            <SegmentViewNode type="page" pagePath="experiment...">
+              <SegmentTrieNode>
+              <ExperimentsPage>
+                <main className="min-h-scre...">
+                  <div className="mx-auto ma...">
+                    <PromptExperimentDashboard>
+                      <section className="shrink-0 b...">
+                        <div>
+                        <div>
+                        <div>
+                        <CaseComparisonTable snapshot={{...}}>
+                          <div className="mt-3 space...">
+                            <div>
+                            <div>
+                            <div className="overflow-x...">
+                              <table className="min-w-[58r...">
+>                               <thead
+>                                 className="bg-zinc-50 text-[10px] uppercase text-zinc-500 dark:bg-zinc-900 dark:text..."
+>                               >
+>                                 {" "}
+                                  ...
+                                ...
+                              ...
+                            ...
+                        ...
+                    ...
+                  ...
+            ...
+          ...
+ 
+[browser] In HTML, whitespace text nodes cannot be a child of <tr>. Make sure you don't have any extra whitespace between tags on each line of your source code.
+This will cause a hydration error.
+
+  ...
+    <RedirectBoundary>
+      <RedirectErrorBoundary router={{...}}>
+        <InnerLayoutRouter url="/experiments" tree={[...]} params={{}} cacheNode={{rsc:{...}, ...}} segmentPath={[...]} ...>
+          <SegmentViewNode type="page" pagePath="experiment...">
+            <SegmentTrieNode>
+            <ExperimentsPage>
+              <main className="min-h-scre...">
+                <div className="mx-auto ma...">
+                  <PromptExperimentDashboard>
+                    <section className="shrink-0 b...">
+                      <div>
+                      <div>
+                      <div>
+                      <CaseComparisonTable snapshot={{...}}>
+                        <div className="mt-3 space...">
+                          <div>
+                          <div>
+                          <div className="overflow-x...">
+                            <table className="min-w-[58r...">
+                              <thead className="bg-zinc-50...">
+>                               <tr>
+>                                 {" "}
+                                  ...
+                                ...
+                              ...
+                            ...
+                          ...
+                      ...
+                  ...
+                ...
+          ...
+        ...
+ 
+[browser] In HTML, whitespace text nodes cannot be a child of <tbody>. Make sure you don't have any extra whitespace between tags on each line of your source code.
+This will cause a hydration error.
+
+  ...
+    <HTTPAccessFallbackBoundary notFound={undefined} forbidden={undefined} unauthorized={undefined}>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/experiments" tree={[...]} params={{}} cacheNode={{rsc:{...}, ...}} segmentPath={[...]} ...>
+            <SegmentViewNode type="page" pagePath="experiment...">
+              <SegmentTrieNode>
+              <ExperimentsPage>
+                <main className="min-h-scre...">
+                  <div className="mx-auto ma...">
+                    <PromptExperimentDashboard>
+                      <section className="shrink-0 b...">
+                        <div>
+                        <div>
+                        <div>
+                        <CaseComparisonTable snapshot={{...}}>
+                          <div className="mt-3 space...">
+                            <div>
+                            <div>
+                            <div className="overflow-x...">
+                              <table className="min-w-[58r...">
+                                <thead>
+>                               <tbody>
+>                                 {" "}
+                                  ...
+                                ...
+                              ...
+                            ...
+                        ...
+                    ...
+                  ...
+            ...
+          ...
+ 
+✓ Compiled in 289ms
+ GET /experiments 200 in 512ms (next.js: 197ms, application-code: 316ms)
+ GET /experiments 200 in 510ms (next.js: 267ms, application-code: 242ms)
+ GET /experiments 200 in 198ms (next.js: 33ms, application-code: 165ms)
+ GET /experiments 200 in 198ms (next.js: 119ms, application-code: 79ms)
+✓ Compiled in 196ms
+ GET /experiments 200 in 254ms (next.js: 126ms, application-code: 128ms)
+ GET /api/experiments 200 in 179ms (next.js: 130ms, application-code: 49ms)
+ GET /api/experiments 200 in 322ms (next.js: 310ms, application-code: 11ms)
+ GET /experiments 200 in 573ms (next.js: 179ms, application-code: 394ms)
+ GET /experiments 200 in 331ms (next.js: 180ms, application-code: 151ms)
+ GET /experiments 200 in 329ms (next.js: 246ms, application-code: 83ms)
+✓ Compiled in 142ms
+ GET /api/experiments 200 in 135ms (next.js: 112ms, application-code: 23ms)
+ GET /api/experiments 200 in 149ms (next.js: 139ms, application-code: 10ms)
+ GET /experiments 200 in 552ms (next.js: 128ms, application-code: 424ms)
+ GET /experiments 200 in 551ms (next.js: 201ms, application-code: 350ms)
+ GET /experiments 200 in 286ms (next.js: 152ms, application-code: 135ms)
+ GET /experiments 200 in 71ms (next.js: 14ms, application-code: 57ms)
+ GET /experiments 200 in 254ms (next.js: 7ms, application-code: 248ms)
+ GET /api/experiments 200 in 13ms (next.js: 3ms, application-code: 9ms)
+ POST /api/experiments 200 in 17ms (next.js: 3ms, application-code: 14ms)
+ POST /api/experiments 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ POST /api/experiments 200 in 8ms (next.js: 2ms, application-code: 5ms)
+ POST /api/experiments 200 in 7ms (next.js: 1947µs, application-code: 5ms)
+ GET /prompts 200 in 65ms (next.js: 31ms, application-code: 35ms)
+ GET /api/prompts 200 in 81ms (next.js: 64ms, application-code: 17ms)
+ GET /api/prompts 200 in 11ms (next.js: 4ms, application-code: 8ms)
