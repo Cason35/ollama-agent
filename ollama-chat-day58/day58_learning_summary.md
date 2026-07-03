@@ -896,3 +896,427 @@ Redis（内存数据结构存储 / 共享状态中心）在 Agent Platform（智
 11. 遇到的最大问题：Docker Desktop（Docker 桌面应用）原本配置了 `127.0.0.1:7890` Proxy（代理），导致拉取 Redis Image（Redis 镜像）失败；移除项目无关代理后，直接访问 Docker Hub（Docker 官方镜像仓库）仍然超时，最终使用镜像源拉取 Redis 7 并成功启动。另一个理解层面的重点是区分本机 Redis、Docker Redis、Cloud Redis（云 Redis）以及 MySQL（关系型数据库）和 Redis（共享状态中心）的职责边界。
 
 12. 当前系统能力：`ollama-chat-day58` 已经从 Day57 的 Adaptive Runtime Decision Engine（自适应运行时决策引擎）升级到 Production Infrastructure V1（生产基础设施第1版）。当前系统可以通过 RedisClient（Redis 客户端封装）连接 Redis，通过 RedisHealthCheck（Redis 健康检查）确认 `PONG`，通过 CacheStore（缓存存储接口）在 MemoryCacheStore（内存缓存存储）和 RedisCacheStore（Redis 缓存存储）之间切换，通过 Semantic Cache（语义缓存）把 AI Answer Cache（AI 回答缓存）写入 Redis，并通过 Redis Explorer（Redis 浏览器）观察 Key（键）、TTL（过期时间）、Type（类型）、Size（大小）、Metrics（指标）和 Operation Trace（操作追踪）。这说明系统已经具备 Shared State Center（共享状态中心）的基础能力，为后续 Queue（队列）、Distributed Lock（分布式锁）、RateLimit（限流）和云端部署打下基础。
+
+## 十五、第58天补充总结
+
+第58天完成的是：
+
+```text
+Production Infrastructure V1（生产基础设施第1版）：Redis Integration（Redis 集成）
+```
+
+现在系统已经完成了这些能力：
+
+- RedisClient（Redis 客户端封装）
+- RedisHealthCheck（Redis 健康检查）
+- RedisCacheStore（Redis 缓存存储）
+- CacheStore Abstraction（缓存存储抽象）
+- Redis Explorer（Redis 浏览器）
+- Redis Metrics（Redis 指标）
+- Trace（追踪记录）接入 Redis Operation（Redis 操作）
+- Semantic Cache（语义缓存）迁移到 Redis（共享状态中心）
+
+缓存已经从：
+
+```text
+Memory Map（内存映射）
+```
+
+升级成：
+
+```text
+Redis（内存数据结构存储 / 共享状态中心）
+```
+
+这意味着 Runtime（运行时）第一次拥有了跨进程共享状态能力。
+
+以后多个 Worker（工作进程）、多个 Backend（后端服务）、多个 Agent（智能体）都可以共享 Redis（共享状态中心）。
+
+## 十六、当前整体进度
+
+Phase 1（第一阶段）：Agent Runtime（智能体运行时）
+
+```text
+██████████████████████████
+100%
+```
+
+Phase 2（第二阶段）：Infrastructure（基础设施）
+
+```text
+Redis（共享状态中心）
+█████░░░░░
+20%
+```
+
+整体进度：
+
+```text
+98%
+```
+
+Day58（第58天）真正要学习的是：Redis（内存数据结构存储）不只是 Cache（缓存），在 Agent Platform（智能体平台）里，它更多承担 Shared State（共享状态）的角色。
+
+例如：
+
+- Memory（记忆）
+- Queue（队列）
+- Lock（锁）
+- Pub/Sub（发布订阅）
+- Rate Limit（限流）
+- Session（会话）
+- Checkpoint（检查点）
+
+这些短生命周期、高频访问、多个进程需要共同读取或修改的状态，很多都可以基于 Redis（共享状态中心）实现。
+
+所以 Day58（第58天）只是 Production Infrastructure（生产基础设施）的开始。
+
+## 十七、Day59 学习计划：Distributed Queue（分布式队列）
+
+Day59（第59天）的主题是：
+
+```text
+Production Infrastructure V2（生产基础设施第2版）
+  -> Distributed Queue（分布式队列）
+```
+
+今天目标是把之前的 Memory Queue（内存队列）升级成真正的 Redis Queue（Redis 队列），让系统支持多个 Worker（工作进程）并发消费任务，真正进入分布式任务调度。
+
+当前队列大概率还是类似：
+
+```text
+queue.enqueue(job)
+  -> jobs.push(job)
+  -> Array（数组）
+```
+
+这种 Memory Queue（内存队列）的问题是：
+
+```text
+服务重启后 Job（任务）会丢
+多个 Backend（后端服务）之间无法共享任务
+多个 Worker（工作进程）可能重复执行
+任务执行失败后缺少可靠恢复机制
+```
+
+生产级系统应该变成：
+
+```text
+Redis（共享状态中心）
+  -> Queue（队列）
+  -> Worker（工作进程）
+  -> ACK（确认机制）
+```
+
+以前的结构是：
+
+```text
+Browser（浏览器）
+  -> Queue（队列）
+  -> Worker（工作进程）
+```
+
+Day59（第59天）目标结构是：
+
+```text
+Backend A（后端服务 A）
+  -> Redis Queue（Redis 队列）
+
+Backend B（后端服务 B）
+  -> Redis Queue（Redis 队列）
+
+Redis Queue（Redis 队列）
+  -> Worker 1（工作进程 1）
+  -> Worker 2（工作进程 2）
+  -> Worker 3（工作进程 3）
+```
+
+这样系统才真正支持 Horizontal Scaling（横向扩容）。
+
+## 十八、第59天任务
+
+### 任务 1：定义 QueueStore（队列存储接口）
+
+先定义统一接口，例如：
+
+```ts
+interface QueueStore {
+  enqueue(): Promise<void>;
+  dequeue(): Promise<Job | null>;
+  peek(): Promise<Job | null>;
+  size(): Promise<number>;
+  remove(): Promise<boolean>;
+}
+```
+
+目标是把 MemoryQueue（内存队列）和 RedisQueue（Redis 队列）统一到同一套接口下。
+
+这样业务代码只依赖 QueueStore（队列存储接口），不直接依赖 Array（数组）或 Redis（内存数据结构存储）。
+
+### 任务 2：实现 RedisQueueStore（Redis 队列存储）
+
+Day59（第59天）先使用 Redis List（Redis 列表）实现。
+
+可以使用：
+
+```text
+LPUSH（从列表左侧写入）
+RPOP（从列表右侧取出）
+```
+
+也可以使用更生产化的：
+
+```text
+XADD（写入 Redis Stream）
+XREADGROUP（消费者组读取 Redis Stream）
+```
+
+但为了学习循序渐进，Day59（第59天）先使用 Redis List（Redis 列表）实现。等 Day66（第66天）左右再升级到 Redis Streams（Redis 流），这样更容易理解 Queue（队列）的基本行为。
+
+### 任务 3：实现 Job Serialization（任务序列化）
+
+以前 Job（任务）可能是内存里的 Object（对象）。
+
+进入 Redis（共享状态中心）后，Job（任务）需要变成 JSON（结构化文本格式）存储。
+
+需要新增：
+
+```ts
+serializeJob()
+deserializeJob()
+```
+
+含义是：
+
+```text
+serializeJob（任务序列化）：把 Job 对象转成 JSON 字符串
+deserializeJob（任务反序列化）：把 JSON 字符串转回 Job 对象
+```
+
+### 任务 4：Worker（工作进程）改成从 Redis Queue（Redis 队列）消费
+
+以前 Worker（工作进程）可能从内存队列读取任务。
+
+Day59（第59天）要改成：
+
+```text
+Worker（工作进程）
+  -> RedisQueue.dequeue()
+  -> Job（任务）
+```
+
+这样多个 Worker（工作进程）就可以共享同一个 Redis Queue（Redis 队列）。
+
+### 任务 5：实现 ACK（确认机制）
+
+ACK（确认机制）表示 Worker（工作进程）处理完 Job（任务）后，需要告诉队列：
+
+```text
+这个任务已经成功完成
+```
+
+不要在 dequeue（出队）时直接删除任务。
+
+因为如果 Worker（工作进程）取出任务后崩溃，而任务已经从队列删除，那么这个 Job（任务）就丢了。
+
+Day59（第59天）可以先实现三段状态：
+
+```text
+Pending Queue（等待队列）
+  -> Processing Queue（处理中队列）
+  -> Done（完成队列）
+```
+
+### 任务 6：实现 Visibility Timeout（可见性超时）
+
+Visibility Timeout（可见性超时）表示：
+
+```text
+Worker（工作进程）取走 Job（任务）后，如果 30 秒内没有 ACK（确认），系统认为它可能失败了。
+```
+
+然后把 Job（任务）重新放回队列，避免任务永久卡在 Processing（处理中）状态。
+
+Day59（第59天）可以先做规则版 Visibility Timeout（可见性超时），不需要一次性做成复杂调度器。
+
+### 任务 7：新增 Queue Metrics（队列指标）
+
+新增类型可以类似：
+
+```ts
+type RedisQueueMetrics = {
+  waiting: number;
+  processing: number;
+  completed: number;
+  failed: number;
+  avgWaitTime: number;
+  avgProcessingTime: number;
+};
+```
+
+这些 Queue Metrics（队列指标）用于观察任务系统是否健康：
+
+```text
+waiting（等待中任务数）
+processing（处理中任务数）
+completed（已完成任务数）
+failed（失败任务数）
+avgWaitTime（平均等待时间）
+avgProcessingTime（平均处理时间）
+```
+
+### 任务 8：实现 Queue Explorer（队列浏览器）
+
+新增前端 Queue Explorer（队列浏览器），展示：
+
+```text
+Waiting（等待中）
+Processing（处理中）
+Completed（已完成）
+Dead Letter（死信队列 / 最终失败队列）
+```
+
+并支持：
+
+```text
+Retry（重试）
+Delete（删除）
+Inspect（检查详情）
+```
+
+Dead Letter（死信队列）用于保存多次失败或无法继续处理的任务，便于后续排查。
+
+### 任务 9：Trace（追踪记录）接入 Queue（队列）
+
+记录这些 Queue Operation（队列操作）：
+
+```text
+enqueue（入队）
+dequeue（出队）
+ack（确认完成）
+retry（重试）
+fail（标记失败）
+delete（删除）
+```
+
+这样以后 Debug（调试）任务问题时，可以看到任务什么时候入队、哪个 Worker（工作进程）取走、是否 ACK（确认）、是否 Retry（重试）。
+
+### 任务 10：完成 Distributed Queue Test（分布式队列测试）
+
+测试目标：
+
+```text
+启动两个 Worker（工作进程）
+连续提交 10 个 Job（任务）
+验证不会重复消费
+验证不会丢失任务
+验证全部完成
+验证失败任务可以 Retry（重试）
+验证超时任务可以回到 Pending Queue（等待队列）
+```
+
+## 十九、第59天验收标准
+
+1. 是否定义 QueueStore（队列存储接口）
+
+2. 是否实现 RedisQueueStore（Redis 队列存储）
+
+3. 是否实现 Job Serialization（任务序列化）
+
+4. Worker（工作进程）是否改为 Redis Queue（Redis 队列）消费
+
+5. 是否实现 ACK（确认机制）
+
+6. 是否实现 Visibility Timeout（可见性超时）
+
+7. 是否增加 Queue Metrics（队列指标）
+
+8. 是否实现 Queue Explorer（队列浏览器）
+
+9. Trace（追踪记录）是否接入 Queue（队列）
+
+10. 是否完成 Distributed Queue Test（分布式队列测试）
+
+## 二十、第59天打卡模板
+
+【第59天打卡】
+
+1. 是否定义 QueueStore（队列存储接口）：是 / 否
+
+2. 是否实现 RedisQueueStore（Redis 队列存储）：是 / 否
+
+3. 是否实现 Job Serialization（任务序列化）：是 / 否
+
+4. Worker（工作进程）是否改为 Redis Queue（Redis 队列）消费：是 / 否
+
+5. 是否实现 ACK（确认机制）：是 / 否
+
+6. 是否实现 Visibility Timeout（可见性超时）：是 / 否
+
+7. 是否增加 Queue Metrics（队列指标）：是 / 否
+
+8. 是否实现 Queue Explorer（队列浏览器）：是 / 否
+
+9. Trace（追踪记录）是否接入 Queue（队列）：是 / 否
+
+10. 是否完成 Distributed Queue Test（分布式队列测试）：是 / 否
+
+11. 遇到的最大问题：
+
+12. 当前系统能力：
+
+## 二十一、Day59 核心认知
+
+Day59（第59天）最重要的一句话是：
+
+```text
+Redis Cache（Redis 缓存）是为了共享数据，Redis Queue（Redis 队列）是为了共享任务。
+```
+
+这是两个完全不同的设计目标：
+
+```text
+Cache（缓存）：解决重复计算的问题。
+Queue（队列）：解决任务调度与可靠执行的问题。
+```
+
+Day58（第58天）解决的是：
+
+```text
+同一个结果算过一次，以后可以复用。
+```
+
+Day59（第59天）解决的是：
+
+```text
+一个任务进入系统后，应该由哪个 Worker（工作进程）执行，如何避免丢失和重复执行。
+```
+
+所以从 Day59（第59天）开始，系统会从 Shared Data（共享数据）进入 Shared Work（共享任务）。
+
+## 二十二、Day58 到 Day63 预告
+
+从 Day58（第58天）开始到 Day63（第63天），基础设施会逐渐成型：
+
+| Day（天数） | 主题 | 核心能力 |
+|---|---|---|
+| Day58（第58天） | Redis（共享状态中心） | 共享缓存和短生命周期状态 |
+| Day59（第59天） | Distributed Queue（分布式队列） | 共享任务 |
+| Day60（第60天） | Distributed Lock（分布式锁） | 共享锁，避免重复执行 |
+| Day61（第61天） | Object Storage（对象存储） | 共享文件 |
+| Day62（第62天） | Config Center（配置中心） | 共享配置 |
+| Day63（第63天） | Secrets Management（密钥管理） | 共享密钥和敏感配置 |
+
+这 6 天围绕一个核心思想：
+
+```text
+把原来只能在单机运行的 Agent Platform（智能体平台），逐步升级为可以横向扩展、支持多实例协作的生产系统。
+```
+
+完成 Day63（第63天）后，会进入：
+
+```text
+Day64 ~ Day73：Production Upgrade（生产化升级）
+```
+
+这一阶段会把前 57 天所有教学版模块，统一升级为真正互通、可部署、可扩展的工业级 Agent Platform（智能体平台）。
