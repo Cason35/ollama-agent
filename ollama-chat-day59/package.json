@@ -1,0 +1,43 @@
+{
+  "name": "ollama-chat-day59",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test:day46": "tsx scripts/test-day46-regression.ts",
+    "test:day47": "tsx scripts/test-day47-usage.ts",
+    "test:day48": "tsx scripts/test-day48-cache.ts",
+    "test:day49": "tsx scripts/test-day49-memory.ts",
+    "test:day50": "tsx scripts/test-day50-model-router.ts",
+    "test:day51": "tsx scripts/test-day51-fallback-circuit.ts",
+    "test:day52": "tsx scripts/test-day52-prompt-registry.ts",
+    "test:day53": "tsx scripts/test-day53-prompt-experiments.ts",
+    "test:day54": "tsx scripts/test-day54-prompt-composition.ts",
+    "test:day55": "tsx scripts/test-day55-dynamic-prompt-optimization.ts",
+    "test:day56": "tsx scripts/test-day56-model-collaboration.ts",
+    "test:day57": "tsx scripts/test-day57-adaptive-runtime.ts",
+    "test:day58": "tsx scripts/test-day58-redis-cache.ts",
+    "test:day59": "tsx scripts/test-day59-distributed-queue.ts"
+  },
+  "dependencies": {
+    "ioredis": "^5.11.1",
+    "mysql2": "^3.14.1",
+    "next": "16.2.4",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.4",
+    "tailwindcss": "^4",
+    "tsx": "^4.22.4",
+    "typescript": "^5"
+  }
+}
