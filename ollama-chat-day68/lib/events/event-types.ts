@@ -1,0 +1,95 @@
+export const EVENT_TYPES = [ // 第65天：集中声明统一事件系统允许发布的全部事件类型。
+  "runtime.started", // 第65天：表示统一运行时开始执行。
+  "runtime.completed", // 第65天：表示统一运行时完成执行。
+  "agent.started", // 第65天：表示智能体开始执行任务。
+  "agent.completed", // 第65天：表示智能体完成任务。
+  "tool.called", // 第65天：表示工具开始被调用。
+  "tool.completed", // 第65天：表示工具调用完成。
+  "model.called", // 第65天：表示模型开始被调用。
+  "model.completed", // 第65天：表示模型调用完成。
+  "prompt.rendered", // 第65天：表示提示词渲染完成。
+  "memory.read", // 第65天：表示记忆读取完成。
+  "memory.write", // 第65天：表示记忆写入完成。
+  "memory.consolidated", // 第68天：表示生产记忆去重与整合完成。
+  "memory.conflict_detected", // 第68天：表示生产记忆检测到重复、矛盾或替代冲突。
+  "memory.archived", // 第68天：表示生产记忆或工作空间记忆完成归档。
+  "memory.deleted", // 第68天：表示生产记忆完成软删除。
+  "retrieval.completed", // 第65天：表示检索流程完成。
+  "evaluation.completed", // 第65天：表示评估流程完成。
+  "error.occurred", // 第65天：表示运行链路发生错误。
+] as const; // 第65天：把事件类型数组收窄为只读字面量元组。
+
+export type EventType = (typeof EVENT_TYPES)[number]; // 第65天：从事件类型元组推导统一事件联合类型。
+export type EventSource = "runtime" | "agent" | "tool" | "model" | "prompt" | "memory" | "retrieval" | "evaluation" | "system"; // 第65天：定义事件来源模块联合类型。
+export type EventDeliveryStatus = "published" | "processed" | "failed"; // 第65天：定义事件在内存总线中的分发状态。
+
+export type RuntimeEvent = { // 第65天：定义所有运行时模块共享的统一事件结构。
+  id: string; // 第65天：保存全局唯一的事件标识。
+  type: EventType; // 第65天：保存本次发生的事件类型。
+  timestamp: number; // 第65天：保存事件发生时的毫秒时间戳。
+  traceId: string; // 第65天：关联 Day64 统一上下文中的链路追踪标识。
+  runtimeContextId: string; // 第65天：关联 Day64 统一上下文，本项目使用 Request ID 作为上下文标识。
+  payload: unknown; // 第65天：保存经过脱敏的事件业务载荷。
+  metadata?: Record<string, unknown>; // 第65天：保存来源、状态和版本等安全扩展信息。
+}; // 第65天：结束统一运行时事件类型定义。
+
+export type EventHandler = (event: RuntimeEvent) => Promise<void> | void; // 第65天：定义同步或异步事件处理函数签名。
+export type Unsubscribe = () => void; // 第65天：定义订阅函数返回的取消订阅函数签名。
+
+export interface EventBus { // 第65天：定义与具体消息中间件无关的统一事件总线协议。
+  publish(event: RuntimeEvent): Promise<void> | void; // 第65天：约束事件发布能力。
+  subscribe(type: EventType, handler: EventHandler): Unsubscribe; // 第65天：约束按事件类型订阅的能力。
+  unsubscribe(type: EventType, handler: EventHandler): void; // 第65天：约束显式取消指定订阅的能力。
+} // 第65天：结束统一事件总线接口定义。
+
+export type RuntimeEventRecord = RuntimeEvent & { // 第65天：扩展事件结构以保存 Event Explorer 所需的投递结果。
+  deliveryStatus: EventDeliveryStatus; // 第65天：保存事件当前投递状态。
+  handlerCount: number; // 第65天：保存本次事件匹配到的订阅者数量。
+  processedAt?: number; // 第65天：保存事件完成全部订阅处理的时间。
+  errors: string[]; // 第65天：保存订阅处理失败时的安全错误摘要。
+}; // 第65天：结束事件历史记录类型定义。
+
+export type TraceTimelineItem = { // 第65天：定义 Trace Subscriber 生成的链路时间线条目。
+  eventId: string; // 第65天：关联原始事件标识。
+  type: EventType; // 第65天：保存时间线事件类型。
+  source: string; // 第65天：保存事件来源模块。
+  timestamp: number; // 第65天：保存时间线发生时间。
+  traceId: string; // 第65天：保存关联的链路追踪标识。
+  runtimeContextId: string; // 第65天：保存关联的统一上下文标识。
+  status: string; // 第65天：保存业务事件状态。
+}; // 第65天：结束链路时间线条目类型定义。
+
+export type EventUsageSnapshot = { // 第65天：定义 Usage Subscriber 聚合的模型用量快照。
+  modelEvents: number; // 第65天：保存已处理的模型完成事件数量。
+  promptTokens: number; // 第65天：保存累计输入令牌数量。
+  completionTokens: number; // 第65天：保存累计输出令牌数量。
+  totalTokens: number; // 第65天：保存累计总令牌数量。
+  cost: number; // 第65天：保存累计估算成本。
+  latencyMs: number; // 第65天：保存累计模型延迟。
+  provider?: string; // 第65天：保存最近一次模型提供方。
+  model?: string; // 第65天：保存最近一次模型名称。
+  traceId?: string; // 第65天：保存最近一次模型事件的链路标识。
+}; // 第65天：结束事件用量快照类型定义。
+
+export type EvaluationTask = { // 第65天：定义由 Agent 完成事件自动创建的评估任务。
+  id: string; // 第65天：保存评估任务唯一标识。
+  runtimeContextId: string; // 第65天：关联统一运行时上下文标识。
+  traceId: string; // 第65天：关联完整链路追踪标识。
+  promptVersion: string; // 第65天：保存被评估输出使用的提示词版本。
+  model: string; // 第65天：保存被评估输出使用的模型。
+  usage: EventUsageSnapshot; // 第65天：保存评估触发时已经由事件聚合的用量快照。
+  agentOutput: string; // 第65天：保存经过摘要后的智能体输出。
+  score: number; // 第65天：保存教学演示使用的评估分数。
+  status: "passed" | "failed"; // 第65天：保存评估是否通过。
+  createdAt: number; // 第65天：保存评估任务创建时间。
+}; // 第65天：结束评估任务类型定义。
+
+export type UnifiedEventSnapshot = { // 第65天：定义 Event Explorer 和测试脚本共享的统一事件快照。
+  context: import("@/lib/runtime/unified-runtime-context").RuntimeContextV2; // 第65天：保存本次事件链路关联的 Day64 统一上下文。
+  events: RuntimeEventRecord[]; // 第65天：保存按发布时间排序的事件历史。
+  traceTimeline: TraceTimelineItem[]; // 第65天：保存 Trace Subscriber 生成的时间线。
+  usage: EventUsageSnapshot; // 第65天：保存 Usage Subscriber 自动聚合的用量。
+  evaluations: EvaluationTask[]; // 第65天：保存 Evaluation Subscriber 自动创建的评估任务。
+  consistent: boolean; // 第65天：保存所有事件是否共享同一上下文与追踪标识。
+  generatedAt: number; // 第65天：保存快照生成时间。
+}; // 第65天：结束统一事件系统快照类型定义。
