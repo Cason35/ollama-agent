@@ -1,0 +1,38 @@
+{
+  "name": "ollama-chat-day71",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test:day64": "tsx scripts/test-day64-unified-runtime-context.ts",
+    "test:day65": "tsx scripts/test-day65-unified-event-system.ts",
+    "test:day66": "tsx scripts/test-day66-unified-registry.ts",
+    "test:day67": "tsx scripts/test-day67-production-prompt-platform.ts",
+    "test:day68": "tsx scripts/test-day68-production-memory-platform.ts",
+    "test:day69": "tsx scripts/test-day69-production-knowledge-platform.ts",
+    "test:day70": "tsx scripts/test-day70-durable-workflow-platform.ts",
+    "test:day71": "tsx scripts/test-day71-production-evaluation-platform.ts"
+  },
+  "dependencies": {
+    "ioredis": "^5.11.1",
+    "minio": "^8.0.7",
+    "mysql2": "^3.14.1",
+    "next": "16.2.4",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.4",
+    "tailwindcss": "^4",
+    "tsx": "^4.22.4",
+    "typescript": "^5"
+  }
+}

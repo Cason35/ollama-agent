@@ -1,0 +1,57 @@
+import { MemoryEventBus } from "@/lib/events/memory-event-bus"; // 第68天：引入统一内存事件总线记录生产记忆生命周期事件。
+import { PersistentLongTermMemoryProvider } from "@/lib/memory/persistent-long-term-memory-provider"; // 第68天：引入 MySQL 与 VectorStore 协同的长期记忆 Provider。
+import { RedisSessionMemoryProvider } from "@/lib/memory/redis-session-memory-provider"; // 第68天：引入 Redis 三键模型会话记忆 Provider。
+import { ProductionMemoryService, createProductionMemoryMetricCounters } from "@/lib/memory/production-memory-service"; // 第68天：引入生产记忆外观服务和共享指标容器工厂。
+import type { MemoryConflictResolution, MemorySearchInput, ProductionMemoryDraft, ProductionMemoryPlatformSnapshot } from "@/lib/memory/production-memory-types"; // 第68天：引入平台动作、检索、写入和快照类型。
+import { createDay66UnifiedRegistry } from "@/lib/registry/registry-runtime"; // 第68天：复用包含历史能力的统一注册中心作为生产记忆平台基础。
+import type { UnifiedRegistry } from "@/lib/registry/unified-registry"; // 第68天：引入统一注册中心类型用于注册可替换记忆能力。
+const DAY68_CREATED_AT = Date.UTC(2026, 6, 15, 0, 0, 0); // 第68天：定义生产记忆能力使用的稳定教学创建时间戳。
+export function registerProductionMemoryCapabilities(registry: UnifiedRegistry): void { // 第68天：把两类 Provider、统一服务和合并策略注册到统一注册中心。
+  registry.upsert({ id: "memory:provider:redis-session", name: "RedisSessionMemoryProvider（Redis 会话记忆提供者）", type: "memory", version: "day68.v1", metadata: { description: "使用 memory:session:{sessionId}:items、summary、meta 三键模型保存短期会话记忆", capabilities: ["memory", "session-memory", "redis", "ttl"], tags: ["memory", "provider", "redis", "session"], storage: "Redis", ttlDays: 7 }, enabled: true, createdAt: DAY68_CREATED_AT }); // 第68天：注册支持 TTL 和快速访问的 Redis 会话记忆 Provider。
+  registry.upsert({ id: "memory:provider:persistent-long-term", name: "PersistentLongTermMemoryProvider（持久化长期记忆提供者）", type: "memory", version: "day68.v1", metadata: { description: "使用 MySQL 保存正文与治理状态，使用 VectorStore 保存 Embedding 与检索索引", capabilities: ["memory", "long-term-memory", "mysql", "vector-search"], tags: ["memory", "provider", "mysql", "vector-store"], storage: "MySQL + VectorStore" }, enabled: true, createdAt: DAY68_CREATED_AT }); // 第68天：注册支持可靠持久化和语义检索的长期记忆 Provider。
+  registry.upsert({ id: "memory:service:production", name: "ProductionMemoryService（生产记忆服务）", type: "memory", version: "day68.v1", metadata: { description: "统一提供 write、retrieve、consolidate、archiveWorkspace、forget 与 RuntimeContext 注入", capabilities: ["memory", "memory-retrieval", "memory-governance", "runtime-context"], tags: ["memory", "service", "facade", "governance"] }, enabled: true, createdAt: DAY68_CREATED_AT }); // 第68天：注册生产记忆统一外观服务。
+  registry.upsert({ id: "memory:strategy:consolidation", name: "MemoryConsolidationStrategy（记忆合并策略）", type: "memory", version: "day68.v1", metadata: { description: "支持重复合并、新状态替代、矛盾人工审核和工作空间高价值归档", capabilities: ["memory-deduplication", "conflict-resolution", "workspace-archive"], tags: ["memory", "strategy", "consolidation", "conflict"] }, enabled: true, createdAt: DAY68_CREATED_AT }); // 第68天：注册可替换的记忆去重、冲突和归档策略。
+} // 第68天：结束生产记忆能力统一注册函数。
+export class ProductionMemoryPlatform { // 第68天：组合 Provider、服务、事件、注册、指标和治理快照的生产记忆平台。
+  readonly counters = createProductionMemoryMetricCounters(); // 第68天：创建由 Provider 与服务共享的累计指标容器。
+  readonly eventBus = new MemoryEventBus(160); // 第68天：创建容量受限的记忆生命周期事件总线。
+  readonly unifiedRegistry = createDay66UnifiedRegistry(); // 第68天：创建继承智能体、工具、模型、提示词、工作流与评估能力的统一注册中心。
+  readonly sessionProvider = new RedisSessionMemoryProvider({ onProviderError: () => { this.counters.providerErrors += 1; }, onExpired: (count) => { this.counters.expiredCount += count; } }); // 第68天：创建真实 Redis 优先且故障自动降级的会话记忆 Provider。
+  readonly longTermProvider = new PersistentLongTermMemoryProvider({ onProviderError: () => { this.counters.providerErrors += 1; }, onExpired: (count) => { this.counters.expiredCount += count; } }); // 第68天：创建 MySQL 优先、VectorStore 检索且故障自动降级的长期记忆 Provider。
+  readonly service = new ProductionMemoryService(this.sessionProvider, this.longTermProvider, this.eventBus, this.counters); // 第68天：创建统一生产记忆外观服务并注入全部依赖。
+  private seeded = false; // 第68天：记录是否已经生成治理台教学数据避免重复写入。
+  constructor() { registerProductionMemoryCapabilities(this.unifiedRegistry); } // 第68天：构造平台时立即注册四类可替换生产记忆能力。
+  async ensureDemoData(): Promise<void> { // 第68天：生成覆盖会话、长期、工作空间、重复和冲突的稳定教学数据。
+    if (this.seeded) return; // 第68天：已经生成数据时保持幂等并直接返回。
+    this.seeded = true; // 第68天：先标记已生成避免并发请求重复进入播种流程。
+    await this.service.write({ scope: "session", scopeId: "day68-session-a", type: "fact", content: "我当前项目使用 MySQL。", importance: 0.82, confidence: 0.96, source: { sessionId: "day68-session-a", requestId: "req-day68-session", traceId: "trace-day68-session", agentId: "chat" }, tags: ["database", "current-task"], status: "active", expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 }); // 第68天：写入用于验证同会话 Redis 命中的数据库事实。
+    await this.service.write({ scope: "session", scopeId: "day68-session-a", type: "summary", content: "当前会话正在构建使用 MySQL 的 Next.js 智能体项目。", importance: 0.7, confidence: 0.9, source: { sessionId: "day68-session-a", traceId: "trace-day68-session" }, tags: ["session-summary"], status: "active", expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 }); // 第68天：写入独立保存到 summary 键的会话摘要。
+    await this.service.write({ scope: "user", scopeId: "day68-user", type: "preference", content: "以后代码优先使用 TypeScript。", importance: 0.88, confidence: 0.97, source: { sessionId: "day68-session-a", traceId: "trace-day68-preference", agentId: "writer" }, tags: ["typescript", "coding-style"], status: "active" }); // 第68天：写入用于验证跨会话长期检索的用户偏好。
+    await this.service.write({ scope: "user", scopeId: "day68-user", type: "preference", content: "用户偏好中文回答。", importance: 0.78, confidence: 0.9, source: { traceId: "trace-day68-dedup-1", agentId: "chat" }, tags: ["language", "zh-CN"], status: "active" }); // 第68天：写入第一条中文回答偏好作为去重基准。
+    await this.service.write({ scope: "user", scopeId: "day68-user", type: "preference", content: "用户偏好中文回答。", importance: 0.8, confidence: 0.92, source: { traceId: "trace-day68-dedup-2", agentId: "writer" }, tags: ["language"], status: "active" }); // 第68天：重复写入同一偏好以演示自动合并而不产生两条活动记忆。
+    await this.service.write({ scope: "user", scopeId: "day68-user", type: "preference", content: "用户偏好简洁回答。", importance: 0.72, confidence: 0.84, source: { traceId: "trace-day68-conflict-1", agentId: "chat" }, tags: ["response-style"], status: "active" }); // 第68天：写入简洁回答偏好作为人工冲突基准。
+    await this.service.write({ scope: "user", scopeId: "day68-user", type: "preference", content: "用户希望提供非常详细的教学步骤。", importance: 0.76, confidence: 0.86, source: { traceId: "trace-day68-conflict-2", agentId: "teacher" }, tags: ["response-style"], status: "active" }); // 第68天：写入详细教学偏好以触发 manual_review 冲突。
+    await this.service.write({ scope: "workspace", scopeId: "research-day68", type: "fact", content: "生产级记忆需要按 Session、User、Workspace、Agent 与 Global 划分作用域。", importance: 0.91, confidence: 0.94, source: { workspaceId: "research-day68", agentId: "research", traceId: "trace-day68-workspace" }, tags: ["finding", "memory-scope"], status: "active" }); // 第68天：写入可被工作空间归档沉淀的重要研究发现。
+    await this.service.write({ scope: "workspace", scopeId: "research-day68", type: "task_state", content: "正在尝试第三版临时页面草稿。", importance: 0.35, confidence: 0.5, source: { workspaceId: "research-day68", agentId: "writer", traceId: "trace-day68-workspace" }, tags: ["draft", "temporary"], status: "active" }); // 第68天：写入不应进入长期记忆的临时草稿。
+    await this.service.write({ scope: "workspace", scopeId: "research-day68", type: "lesson", content: "不确定的冲突记忆必须进入人工审核，不能由模型擅自删除。", importance: 0.95, confidence: 0.98, source: { workspaceId: "research-day68", agentId: "critic", traceId: "trace-day68-workspace" }, tags: ["lesson", "governance"], status: "active" }); // 第68天：写入可被归档为长期教训的稳定工作空间结论。
+    await this.service.retrieve({ query: "我现在数据库用的是什么？", sessionId: "day68-session-a", userId: "day68-user", workspaceId: "research-day68", agentId: "chat", topK: 5, minScore: 0.15 }); // 第68天：执行一次三路统一检索生成治理台评分预览和 memory.read 事件。
+  } // 第68天：结束生产记忆教学数据生成方法。
+  async getSnapshot(seed = true): Promise<ProductionMemoryPlatformSnapshot> { // 第68天：生成 Memory Governance Explorer 和自动化测试共享的平台快照。
+    if (seed) await this.ensureDemoData(); // 第68天：默认确保治理台拥有覆盖验收场景的教学数据。
+    const items = await this.service.listAll(); // 第68天：读取 Redis 会话记忆与 MySQL 长期记忆的统一列表。
+    const metrics = await this.service.getMetrics(); // 第68天：聚合库存、检索、去重、冲突、归档和故障指标。
+    return { items, conflicts: this.service.listConflicts(), metrics, providers: { session: { name: this.sessionProvider.name, backend: this.sessionProvider.getBackendKind(), ttlSeconds: this.sessionProvider.ttlSeconds, keyPattern: this.sessionProvider.getKeyPattern() }, longTerm: { name: this.longTermProvider.name, metadataBackend: this.longTermProvider.getMetadataBackendKind(), vectorBackend: "Local ProductionMemoryVectorStore", vectorCount: this.longTermProvider.vectorStore.count() } }, registryItems: this.unifiedRegistry.list("memory").filter((item) => item.version === "day68.v1"), events: this.eventBus.getHistory(), lastRetrieval: this.service.getLastRetrieval(), generatedAt: Date.now() }; // 第68天：返回治理条目、冲突、指标、Provider、注册项、事件和最近检索完整快照。
+  } // 第68天：结束生产记忆平台快照生成方法。
+  async write(draft: ProductionMemoryDraft): Promise<ProductionMemoryPlatformSnapshot> { await this.service.write(draft); return await this.getSnapshot(false); } // 第68天：写入一条生产记忆并返回最新治理快照。
+  async retrieve(input: MemorySearchInput): Promise<ProductionMemoryPlatformSnapshot> { await this.service.retrieve(input); return await this.getSnapshot(false); } // 第68天：执行统一记忆检索并返回带评分明细的最新快照。
+  async archive(id: string): Promise<ProductionMemoryPlatformSnapshot> { await this.service.archive(id); return await this.getSnapshot(false); } // 第68天：归档指定生产记忆并返回最新治理快照。
+  async forget(id: string): Promise<ProductionMemoryPlatformSnapshot> { await this.service.forget(id); return await this.getSnapshot(false); } // 第68天：软删除指定生产记忆并返回最新治理快照。
+  async pin(id: string, pinned: boolean): Promise<ProductionMemoryPlatformSnapshot> { await this.service.pin(id, pinned); return await this.getSnapshot(false); } // 第68天：固定或取消固定指定记忆并返回最新治理快照。
+  async merge(primaryId: string, secondaryId: string): Promise<ProductionMemoryPlatformSnapshot> { await this.service.merge(primaryId, secondaryId); return await this.getSnapshot(false); } // 第68天：合并两条同作用域记忆并返回最新治理快照。
+  async consolidate(): Promise<ProductionMemoryPlatformSnapshot> { await this.service.consolidate(); return await this.getSnapshot(false); } // 第68天：执行全平台记忆整合并返回最新治理快照。
+  async archiveWorkspace(workspaceId: string, targetUserId?: string): Promise<ProductionMemoryPlatformSnapshot> { await this.service.archiveWorkspace(workspaceId, targetUserId); return await this.getSnapshot(false); } // 第68天：归档工作空间高价值记忆并返回最新治理快照。
+  async resolveConflict(conflictIdValue: string, resolution: Exclude<MemoryConflictResolution, "manual_review">): Promise<ProductionMemoryPlatformSnapshot> { await this.service.resolveConflict(conflictIdValue, resolution); return await this.getSnapshot(false); } // 第68天：人工确认冲突处理结论并返回最新治理快照。
+} // 第68天：结束 ProductionMemoryPlatform 组合实现。
+const globalPlatform = globalThis as typeof globalThis & { day68ProductionMemoryPlatform?: ProductionMemoryPlatform }; // 第68天：扩展全局对象类型以在 Next.js 开发热更新期间复用平台状态。
+export const productionMemoryPlatform = globalPlatform.day68ProductionMemoryPlatform ?? new ProductionMemoryPlatform(); // 第68天：创建或复用进程级生产记忆平台单例。
+globalPlatform.day68ProductionMemoryPlatform = productionMemoryPlatform; // 第68天：保存平台单例以让 API 治理动作保持状态。
