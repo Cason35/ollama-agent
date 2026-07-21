@@ -1,0 +1,50 @@
+import { GovernanceRuntime } from "@/lib/governance/governance-runtime"; // 第73天：引入治理运行时执行六类生产安全验收场景。
+import type { GatewayResult, GovernedResource, SecurityTestEvidence } from "@/lib/governance/types"; // 第73天：引入网关结果、治理资源和测试证据类型。
+export const DAY73_DEMO_TOKENS = { alphaAdmin: "day73.alpha.admin.token", alphaUser: "day73.alpha.user.token", betaAdmin: "day73.beta.admin.token", quotaAdmin: "day73.quota.admin.token" } as const; // 第73天：定义仅用于本地教学场景的确定性不透明令牌。
+export type Day73FixtureResult = { alphaTenantId: string; betaTenantId: string; quotaTenantId: string; alphaKnowledgeId: string; deletedWorkflowId: string; governedTraceId: string; securityTests: SecurityTestEvidence[] }; // 第73天：定义生产安全场景输出的关键租户、资源、链路和证据标识。
+export async function seedDay73GovernanceScenarios(runtime: GovernanceRuntime): Promise<Day73FixtureResult> { // 第73天：创建身份、权限、隔离、配额、审计和完整生产请求链场景。
+  const createdAt = Date.UTC(2026, 6, 21, 8, 0, 0); // 第73天：使用稳定教学时间保证测试输出可重复。
+  const alpha = await runtime.createTenant({ id: "tenant-alpha", name: "Alpha Research", plan: "pro", status: "active", createdAt }); // 第73天：创建专业版Alpha租户用于正常业务和权限场景。
+  const beta = await runtime.createTenant({ id: "tenant-beta", name: "Beta Logistics", plan: "enterprise", status: "active", createdAt: createdAt + 1 }); // 第73天：创建企业版Beta租户用于跨租户隔离场景。
+  const quota = await runtime.createTenant({ id: "tenant-quota", name: "Quota Limited Lab", plan: "free", status: "active", createdAt: createdAt + 2 }); // 第73天：创建免费版受限租户用于配额拒绝场景。
+  const alphaAdmin = await runtime.createUser({ id: "user-alpha-admin", name: "Alpha Admin", email: "admin@alpha.example", status: "active", createdAt: createdAt + 10 }); // 第73天：创建Alpha管理员身份。
+  const alphaUser = await runtime.createUser({ id: "user-alpha-member", name: "Alpha User", email: "user@alpha.example", status: "active", createdAt: createdAt + 11 }); // 第73天：创建Alpha普通用户身份用于权限拒绝和智能体调用。
+  const betaAdmin = await runtime.createUser({ id: "user-beta-admin", name: "Beta Admin", email: "admin@beta.example", status: "active", createdAt: createdAt + 12 }); // 第73天：创建Beta管理员身份用于跨租户读取验证。
+  const quotaAdmin = await runtime.createUser({ id: "user-quota-admin", name: "Quota Admin", email: "admin@quota.example", status: "active", createdAt: createdAt + 13 }); // 第73天：创建受限租户管理员身份用于配额验证。
+  runtime.addMembership({ id: "membership-alpha-admin", userId: alphaAdmin.id, tenantId: alpha.id, roleIds: ["role-admin"], createdAt: createdAt + 20 }); // 第73天：绑定Alpha管理员角色和租户成员关系。
+  runtime.addMembership({ id: "membership-alpha-user", userId: alphaUser.id, tenantId: alpha.id, roleIds: ["role-user"], createdAt: createdAt + 21 }); // 第73天：绑定Alpha普通用户角色和租户成员关系。
+  runtime.addMembership({ id: "membership-beta-admin", userId: betaAdmin.id, tenantId: beta.id, roleIds: ["role-admin"], createdAt: createdAt + 22 }); // 第73天：绑定Beta管理员角色和租户成员关系。
+  runtime.addMembership({ id: "membership-quota-admin", userId: quotaAdmin.id, tenantId: quota.id, roleIds: ["role-admin"], createdAt: createdAt + 23 }); // 第73天：绑定受限租户管理员角色和租户成员关系。
+  runtime.registerToken(DAY73_DEMO_TOKENS.alphaAdmin, alphaAdmin.id, alpha.id); // 第73天：注册Alpha管理员本地演示令牌。
+  runtime.registerToken(DAY73_DEMO_TOKENS.alphaUser, alphaUser.id, alpha.id); // 第73天：注册Alpha普通用户本地演示令牌。
+  runtime.registerToken(DAY73_DEMO_TOKENS.betaAdmin, betaAdmin.id, beta.id); // 第73天：注册Beta管理员本地演示令牌。
+  runtime.registerToken(DAY73_DEMO_TOKENS.quotaAdmin, quotaAdmin.id, quota.id); // 第73天：注册受限租户管理员本地演示令牌。
+  runtime.resourceStore.create({ id: "agent-day73-governed", type: "agent", name: "Day73 Governed Agent", ownerContext: { tenantId: alpha.id, createdBy: alphaAdmin.id }, metadata: { version: "1.0.0", productionReady: true }, createdAt: createdAt + 30 }); // 第73天：创建Alpha租户拥有的受治理智能体资源供完整生产请求执行。
+  const authentication = await runtime.execute({ token: DAY73_DEMO_TOKENS.alphaAdmin, tenantId: alpha.id, action: "governance.read", resourceType: "platform", requestId: "req-day73-auth", traceId: "trace-day73-auth" }); // 第73天：Case1通过登录令牌生成包含用户、租户和权限的运行时上下文。
+  const permissionDenied = await runtime.execute({ token: DAY73_DEMO_TOKENS.alphaUser, tenantId: alpha.id, action: "prompt.publish", resourceType: "prompt", resourceId: "prompt-alpha-v3", requestId: "req-day73-permission-denied", traceId: "trace-day73-permission-denied" }); // 第73天：Case2让普通用户尝试发布提示词并触发权限拒绝。
+  const knowledgeCreated = await runtime.execute({ token: DAY73_DEMO_TOKENS.alphaAdmin, tenantId: alpha.id, action: "knowledge.create", resourceType: "knowledge", estimatedUsage: { knowledgeSize: 256 }, payload: { id: "knowledge-alpha-private", name: "Alpha私有研究知识", size: 256, content: "Alpha confidential vector knowledge" }, requestId: "req-day73-knowledge-create", traceId: "trace-day73-knowledge-create" }); // 第73天：Case3先由Alpha租户创建带所有者上下文的私有知识。
+  const betaSearch = await runtime.execute({ token: DAY73_DEMO_TOKENS.betaAdmin, tenantId: beta.id, action: "knowledge.read", resourceType: "knowledge", payload: { query: "Alpha" }, requestId: "req-day73-tenant-isolation", traceId: "trace-day73-tenant-isolation" }); // 第73天：Case3再由Beta租户搜索Alpha关键字验证无法读取跨租户数据。
+  runtime.setQuota(quota.id, { dailyTokens: 100, monthlyCost: 1, maxWorkflow: 1, maxKnowledgeSize: 100 }); // 第73天：把受限租户每日令牌额度设置为一百。
+  runtime.setUsage(quota.id, { dailyTokens: 100, monthlyCost: 0, workflowCount: 0, knowledgeSize: 0 }); // 第73天：把受限租户每日令牌用量推进到额度上限。
+  const quotaExceeded = await runtime.execute({ token: DAY73_DEMO_TOKENS.quotaAdmin, tenantId: quota.id, action: "agent.execute", resourceType: "agent", estimatedUsage: { dailyTokens: 1, monthlyCost: 0.001 }, requestId: "req-day73-quota-exceeded", traceId: "trace-day73-quota-exceeded" }); // 第73天：Case4继续调用模型并触发quota.exceeded拒绝和审计记录。
+  await runtime.execute({ token: DAY73_DEMO_TOKENS.alphaAdmin, tenantId: alpha.id, action: "workflow.create", resourceType: "workflow", estimatedUsage: { workflowCount: 1 }, payload: { id: "workflow-alpha-delete", name: "待删除工作流" }, requestId: "req-day73-workflow-create", traceId: "trace-day73-workflow-create" }); // 第73天：Case5先创建带Alpha租户归属的工作流资源。
+  const workflowDeleted = await runtime.execute({ token: DAY73_DEMO_TOKENS.alphaAdmin, tenantId: alpha.id, action: "workflow.delete", resourceType: "workflow", resourceId: "workflow-alpha-delete", requestId: "req-day73-workflow-delete", traceId: "trace-day73-workflow-delete" }); // 第73天：Case5删除工作流并验证审计日志记录完整动作和结果。
+  const governedAgent = await runtime.execute({ token: DAY73_DEMO_TOKENS.alphaUser, tenantId: alpha.id, action: "agent.execute", resourceType: "agent", resourceId: "agent-day73-governed", estimatedUsage: { dailyTokens: 1200, monthlyCost: 0.02 }, requestId: "req-day73-governed-agent", traceId: "trace-day73-governed-agent", payload: { prompt: "生成多租户平台治理摘要" } }); // 第73天：Case6执行包含身份、租户、权限、链路、用量和审计的完整请求。
+  const knowledge = knowledgeCreated.data as GovernedResource | undefined; // 第73天：读取Alpha知识创建结果用于资源归属证据。
+  const betaResults = betaSearch.data as GovernedResource[] | undefined; // 第73天：读取Beta租户知识搜索结果用于隔离证据。
+  const governedData = governedAgent.data as { traceId?: string } | undefined; // 第73天：读取完整智能体请求的链路标识。
+  const events = runtime.eventBus.getHistory(); // 第73天：读取权限、配额和审计事件历史。
+  const audits = runtime.auditLogger.list(); // 第73天：读取全部网关动作审计记录。
+  const governedTrace = runtime.observabilityRuntime.queryTrace(governedData?.traceId ?? ""); // 第73天：从治理请求进入Day72分布式链路诊断。
+  const tests: SecurityTestEvidence[] = [ // 第73天：组装六类生产安全测试的通过状态和可读证据。
+    { id: "case-authentication", name: "Case 1 · 用户认证", passed: authentication.ok && authentication.context?.identityContext?.tenantId === alpha.id && Boolean(authentication.context.securityContext?.permissions.length), evidence: `RuntimeContext包含user=${authentication.context?.userId}、tenant=${authentication.context?.identityContext?.tenantId}和${authentication.context?.securityContext?.permissions.length ?? 0}项权限` }, // 第73天：验证登录请求生成完整身份和安全上下文。
+    { id: "case-permission-denied", name: "Case 2 · 权限拒绝", passed: permissionDenied.status === 403 && events.some((event) => event.type === "permission.denied") && audits.some((log) => log.action === "prompt.publish" && log.result === "permission_denied"), evidence: "普通User发布Prompt被拒绝，同时产生permission.denied事件和审计记录" }, // 第73天：验证RBAC拒绝、事件和审计三项闭环。
+    { id: "case-tenant-isolation", name: "Case 3 · 租户隔离", passed: knowledge?.ownerContext.tenantId === alpha.id && betaSearch.ok && (betaResults?.length ?? -1) === 0, evidence: "Alpha知识携带tenant-alpha归属，Beta按同一关键字搜索返回0条" }, // 第73天：验证Tenant A数据不会被Tenant B读取。
+    { id: "case-quota", name: "Case 4 · 配额限制", passed: quotaExceeded.status === 429 && quotaExceeded.code === "QUOTA_EXCEEDED" && events.some((event) => event.type === "quota.exceeded"), evidence: "令牌额度达到100/100后继续调用模型被拒绝并发布quota.exceeded" }, // 第73天：验证超过每日令牌额度后高成本操作被拒绝。
+    { id: "case-audit", name: "Case 5 · 审计日志", passed: workflowDeleted.ok && audits.some((log) => log.action === "workflow.delete" && log.resourceId === "workflow-alpha-delete" && log.result === "success") && runtime.auditLogger.verifyIntegrity(), evidence: "删除Workflow记录user、tenant、resource、result、requestId、traceId且哈希链完整" }, // 第73天：验证资源删除审计字段和防篡改哈希链。
+    { id: "case-production-chain", name: "Case 6 · 完整生产请求链", passed: governedAgent.ok && Boolean(governedTrace.trace) && runtime.quotaManager.getUsage(alpha.id).dailyTokens >= 1200 && audits.some((log) => log.traceId === governedData?.traceId && log.action === "agent.execute" && log.result === "success"), evidence: "User → Tenant → Permission → Trace → Usage → Audit六段链路全部可查询" }, // 第73天：验证完整多租户智能体生产请求闭环。
+  ]; // 第73天：结束六类生产安全测试证据定义。
+  runtime.setSecurityTests(tests); // 第73天：把最新安全测试证据写入治理仪表盘快照。
+  return { alphaTenantId: alpha.id, betaTenantId: beta.id, quotaTenantId: quota.id, alphaKnowledgeId: knowledge?.id ?? "", deletedWorkflowId: (workflowDeleted.data as GovernedResource | undefined)?.id ?? "", governedTraceId: governedData?.traceId ?? "", securityTests: tests }; // 第73天：返回测试脚本需要的关键标识和证据。
+} // 第73天：结束Day73生产安全场景构建函数。
+export function gatewaySucceeded(result: GatewayResult): boolean { return result.ok && result.status === 200 && result.code === "OK"; } // 第73天：提供测试文档示例可复用的网关成功判定函数。

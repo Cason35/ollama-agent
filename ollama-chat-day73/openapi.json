@@ -1,0 +1,1541 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Ollama Chat Day40 API",
+    "version": "0.1.0",
+    "description": "ollama-chat-day40 项目的接口文档，可导入 Apifox 或 Postman。Day40 核心能力是 Supervisor Agent（监督智能体）驱动的 Multi-Agent Runtime（多智能体运行时）。所有接口默认使用 ApiEnvelope（统一接口响应包装）：{ ok, code, data, msg }。"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3040",
+      "description": "本地开发服务"
+    },
+    {
+      "url": "http://localhost:3000",
+      "description": "Next.js 默认本地服务"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Chat",
+      "description": "聊天接口与 Day40 Supervisor Agent（监督智能体）入口"
+    },
+    {
+      "name": "Agents",
+      "description": "Agent Registry（智能体注册表）与 Supervisor Runtime Dashboard（监督运行时看板）数据"
+    },
+    {
+      "name": "Knowledge",
+      "description": "Knowledge Store（知识库）与 RAG（检索增强生成）调试接口"
+    },
+    {
+      "name": "Queue",
+      "description": "Queue Runtime（队列运行时）接口"
+    },
+    {
+      "name": "Tools",
+      "description": "Tool Registry（工具注册表）接口"
+    },
+    {
+      "name": "Workflow",
+      "description": "Workflow（工作流）持久化与 HITL（人类参与确认）接口"
+    }
+  ],
+  "paths": {
+    "/api/chat": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "发送聊天消息",
+        "description": "普通提问会进入 Day40 Supervisor Agent（监督智能体）链路：Supervisor 生成 AgentPlan（智能体计划），经过 Validator（校验器）校验后执行各 Agent（智能体）。当 useWorkflow=true 时保留旧 Workflow as Job（工作流作为任务执行）分支。",
+        "operationId": "postApiChat",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              },
+              "examples": {
+                "supervisorChat": {
+                  "summary": "普通 Supervisor 多智能体聊天",
+                  "value": {
+                    "messages": [
+                      {
+                        "role": "user",
+                        "content": "帮我学习 LangGraph 并制定三天学习计划"
+                      }
+                    ],
+                    "provider": "local",
+                    "useWorkflow": false
+                  }
+                },
+                "workflowJob": {
+                  "summary": "创建 Workflow Job（工作流任务）",
+                  "value": {
+                    "messages": [
+                      {
+                        "role": "user",
+                        "content": "帮我做一个需要多步骤执行的学习计划"
+                      }
+                    ],
+                    "provider": "local",
+                    "useWorkflow": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功返回聊天、工作流或其他业务响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "502": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/agents": {
+      "get": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "获取 Agent 注册表与 Supervisor 协作快照",
+        "description": "返回默认 Agent（智能体）列表、能力路由结果、运行指标、Supervisor Agent（监督智能体）示例执行结果和 AgentPlan（智能体计划）协作快照。",
+        "operationId": "getApiAgents",
+        "responses": {
+          "200": {
+            "description": "Agent Dashboard（智能体看板）数据",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/AgentsPayload"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tools": {
+      "get": {
+        "tags": [
+          "Tools"
+        ],
+        "summary": "获取工具注册表",
+        "description": "返回 Tool Registry（工具注册表）中的工具描述和 Metrics（指标）。",
+        "operationId": "getApiTools",
+        "responses": {
+          "200": {
+            "description": "工具列表和指标",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "tools": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/ToolDescriptor"
+                              }
+                            },
+                            "metrics": {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/knowledge": {
+      "get": {
+        "tags": [
+          "Knowledge"
+        ],
+        "summary": "获取知识库概览",
+        "description": "返回 Knowledge Explorer（知识浏览器）、Vector Explorer（向量浏览器）、知识库指标和最近检索信息。",
+        "operationId": "getApiKnowledge",
+        "responses": {
+          "200": {
+            "description": "知识库概览",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Knowledge"
+        ],
+        "summary": "导入知识或重建索引",
+        "description": "传入 title/content 时导入知识文档；传入 action=reindex 时重建知识库索引。",
+        "operationId": "postApiKnowledge",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/KnowledgeImportRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/KnowledgeReindexRequest"
+                  }
+                ]
+              },
+              "examples": {
+                "importDocument": {
+                  "summary": "导入知识文档",
+                  "value": {
+                    "title": "LangGraph 笔记",
+                    "content": "LangGraph 是一个用于构建图式智能体工作流的框架。"
+                  }
+                },
+                "reindex": {
+                  "summary": "重建索引",
+                  "value": {
+                    "action": "reindex"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "导入或重建成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/knowledge/retrieve": {
+      "post": {
+        "tags": [
+          "Knowledge"
+        ],
+        "summary": "检索知识库",
+        "description": "执行 Query Rewrite（查询改写）和 Multi-Query Retrieval（多查询检索），用于 RAG Debug（检索增强生成调试）。",
+        "operationId": "postApiKnowledgeRetrieve",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeRetrieveRequest"
+              },
+              "example": {
+                "query": "Workflow Runtime",
+                "recallK": 20,
+                "topK": 5,
+                "minScore": 0.3,
+                "mode": "hybrid"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "检索结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/queue": {
+      "get": {
+        "tags": [
+          "Queue"
+        ],
+        "summary": "获取队列快照",
+        "description": "返回 Queue Runtime（队列运行时）任务列表、WorkerPool（工作进程池）、Metrics（指标）和资源限制状态。",
+        "operationId": "getApiQueue",
+        "responses": {
+          "200": {
+            "description": "队列快照",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Queue"
+        ],
+        "summary": "创建队列任务",
+        "description": "创建 Job（任务）并加入 Queue Runtime（队列运行时）。",
+        "operationId": "postApiQueue",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateJobInput"
+              },
+              "examples": {
+                "chat": {
+                  "summary": "创建 chat 任务",
+                  "value": {
+                    "type": "chat",
+                    "resourceType": "llm",
+                    "priority": 5,
+                    "payload": {
+                      "prompt": "测试队列 chat 任务"
+                    }
+                  }
+                },
+                "workflow": {
+                  "summary": "创建 workflow 任务",
+                  "value": {
+                    "type": "workflow",
+                    "resourceType": "workflow",
+                    "priority": 9,
+                    "timeoutMs": 120000,
+                    "payload": {
+                      "goal": "异步执行一个 Workflow 示例任务"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "任务创建成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Queue"
+        ],
+        "summary": "执行队列任务生命周期动作",
+        "description": "支持 requeue（重新入队）、restart（重启为新任务）、cancel（取消任务）、shutdown（优雅关闭 WorkerPool）。",
+        "operationId": "patchApiQueue",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueueActionRequest"
+              },
+              "examples": {
+                "requeue": {
+                  "value": {
+                    "action": "requeue",
+                    "jobId": "job_xxx"
+                  }
+                },
+                "restart": {
+                  "value": {
+                    "action": "restart",
+                    "jobId": "job_xxx"
+                  }
+                },
+                "cancel": {
+                  "value": {
+                    "action": "cancel",
+                    "jobId": "job_xxx"
+                  }
+                },
+                "shutdown": {
+                  "value": {
+                    "action": "shutdown",
+                    "gracePeriodMs": 10000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "动作执行成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/workflows": {
+      "get": {
+        "tags": [
+          "Workflow"
+        ],
+        "summary": "获取工作流快照列表",
+        "description": "从 MySQL（关系型数据库）读取全部 WorkflowState（工作流状态快照）。",
+        "operationId": "getApiWorkflows",
+        "responses": {
+          "200": {
+            "description": "工作流快照列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/WorkflowState"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Workflow"
+        ],
+        "summary": "保存工作流快照",
+        "description": "保存或覆盖一条 WorkflowState（工作流状态快照）。",
+        "operationId": "postApiWorkflows",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkflowState"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "保存成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/workflows/{id}": {
+      "get": {
+        "tags": [
+          "Workflow"
+        ],
+        "summary": "获取单条工作流快照",
+        "description": "按 workflowId（工作流 ID）读取单条 WorkflowState（工作流状态快照）。",
+        "operationId": "getApiWorkflowById",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkflowIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "查询成功；未命中时 data 为 null 且 msg 为 not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Workflow"
+        ],
+        "summary": "删除单条工作流快照",
+        "description": "按 workflowId（工作流 ID）删除单条 WorkflowState（工作流状态快照），不存在时也返回 200。",
+        "operationId": "deleteApiWorkflowById",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkflowIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "删除结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/workflows/purge": {
+      "post": {
+        "tags": [
+          "Workflow"
+        ],
+        "summary": "清理过期工作流快照",
+        "description": "删除超过 7 天未更新的 WorkflowState（工作流状态快照）。",
+        "operationId": "postApiWorkflowsPurge",
+        "responses": {
+          "200": {
+            "description": "清理结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/workflow/confirm": {
+      "post": {
+        "tags": [
+          "Workflow"
+        ],
+        "summary": "确认或取消 HITL 工作流步骤",
+        "description": "HITL（Human-in-the-loop，人类参与确认）接口，用于确认或取消等待人工确认的 Workflow Step（工作流步骤）。",
+        "operationId": "postApiWorkflowConfirm",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkflowConfirmRequest"
+              },
+              "examples": {
+                "confirm": {
+                  "value": {
+                    "workflowId": "wf_xxx",
+                    "stepId": "step_xxx",
+                    "decision": "confirm",
+                    "provider": "local"
+                  }
+                },
+                "cancel": {
+                  "value": {
+                    "workflowId": "wf_xxx",
+                    "stepId": "step_xxx",
+                    "decision": "cancel",
+                    "provider": "local"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "确认、取消或暂停上下文未找到",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "WorkflowIdPath": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "Workflow ID（工作流 ID）",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "responses": {
+      "ErrorEnvelope": {
+        "description": "错误响应，仍使用 ApiEnvelope（统一接口响应包装）",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiEnvelope"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ApiEnvelope": {
+        "type": "object",
+        "required": [
+          "ok",
+          "code",
+          "data",
+          "msg"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "业务是否成功"
+          },
+          "code": {
+            "type": "integer",
+            "description": "业务状态码"
+          },
+          "data": {
+            "nullable": true,
+            "description": "业务数据",
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "array",
+                "items": {}
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "msg": {
+            "type": "string",
+            "description": "响应消息"
+          }
+        }
+      },
+      "GenericEnvelope": {
+        "$ref": "#/components/schemas/ApiEnvelope"
+      },
+      "ChatEnvelope": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ApiEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/ChatResponseBody"
+              }
+            }
+          }
+        ]
+      },
+      "ChatRequest": {
+        "type": "object",
+        "required": [
+          "messages"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "description": "对话历史",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            },
+            "minItems": 1
+          },
+          "memory": {
+            "$ref": "#/components/schemas/Memory"
+          },
+          "useWorkflow": {
+            "type": "boolean",
+            "description": "是否启用 Workflow as Job（工作流作为任务执行）分支",
+            "default": false
+          },
+          "provider": {
+            "type": "string",
+            "description": "模型提供商",
+            "enum": [
+              "local",
+              "mimo"
+            ],
+            "default": "local"
+          },
+          "mimoModel": {
+            "type": "string",
+            "description": "MiMo 模型 ID，仅 provider=mimo 时使用"
+          }
+        }
+      },
+      "ChatMessage": {
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "content": {
+            "type": "string"
+          }
+        }
+      },
+      "Memory": {
+        "type": "object",
+        "properties": {
+          "shortTerm": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryItem"
+            }
+          },
+          "longTerm": {
+            "type": "string",
+            "description": "兼容旧字段"
+          }
+        }
+      },
+      "MemoryItem": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "string",
+            "enum": [
+              "high",
+              "low"
+            ]
+          }
+        }
+      },
+      "ChatResponseBody": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ChatResponse"
+          },
+          {
+            "$ref": "#/components/schemas/WeatherResponse"
+          },
+          {
+            "$ref": "#/components/schemas/SummaryResponse"
+          },
+          {
+            "$ref": "#/components/schemas/TodoResponse"
+          },
+          {
+            "$ref": "#/components/schemas/WorkflowResponse"
+          }
+        ]
+      },
+      "ChatResponse": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "chat"
+            ]
+          },
+          "content": {
+            "type": "string"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/Memory"
+          }
+        }
+      },
+      "WeatherResponse": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "weather"
+            ]
+          },
+          "keyword": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/Memory"
+          }
+        }
+      },
+      "SummaryResponse": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "summary"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/Memory"
+          }
+        }
+      },
+      "TodoResponse": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "todo"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TodoItem"
+            }
+          },
+          "memory": {
+            "$ref": "#/components/schemas/Memory"
+          }
+        }
+      },
+      "TodoItem": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WorkflowResponse": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "workflow"
+            ]
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/Workflow"
+          },
+          "finalSummary": {
+            "type": "string"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/Memory"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "waitingStepId": {
+            "type": "string"
+          }
+        }
+      },
+      "Agent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "systemPrompt": {
+            "type": "string"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AgentPlan": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string"
+          },
+          "selectedAgents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentPlanStep"
+            }
+          }
+        }
+      },
+      "AgentPlanStep": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "task": {
+            "type": "string"
+          },
+          "dependsOn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AgentResult": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "childResults": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentResult"
+            }
+          }
+        }
+      },
+      "AgentCallEdge": {
+        "type": "object",
+        "properties": {
+          "fromAgentId": {
+            "type": "string"
+          },
+          "toAgentId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentTimelineEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AgentsPayload": {
+        "type": "object",
+        "properties": {
+          "agents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Agent"
+            }
+          },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "routes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          "demoResult": {
+            "$ref": "#/components/schemas/AgentResult"
+          },
+          "collaboration": {
+            "type": "object",
+            "properties": {
+              "result": {
+                "$ref": "#/components/schemas/AgentResult"
+              },
+              "callGraph": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AgentCallEdge"
+                }
+              },
+              "timeline": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AgentTimelineEvent"
+                }
+              },
+              "metrics": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "plan": {
+                "$ref": "#/components/schemas/AgentPlan"
+              },
+              "validation": {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "errors": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "KnowledgeImportRequest": {
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        }
+      },
+      "KnowledgeReindexRequest": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "reindex"
+            ]
+          }
+        }
+      },
+      "KnowledgeRetrieveRequest": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "recallK": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "topK": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "minScore": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "mode": {
+            "type": "string",
+            "description": "检索模式，例如 hybrid、vector、keyword"
+          }
+        }
+      },
+      "CreateJobInput": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "workflow",
+              "retrieval",
+              "embedding",
+              "reindex",
+              "unstable",
+              "alwaysFail",
+              "reminder",
+              "chat"
+            ]
+          },
+          "resourceType": {
+            "type": "string",
+            "description": "资源类型，例如 llm、workflow、embedding 等，具体以项目 RESOURCE_TYPES 为准"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "scheduledAt": {
+            "type": "integer",
+            "description": "计划执行时间戳，毫秒"
+          },
+          "scheduledDelayMs": {
+            "type": "integer"
+          },
+          "retryPolicy": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "timeoutMs": {
+            "type": "integer"
+          }
+        }
+      },
+      "QueueActionRequest": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "requeue",
+              "restart",
+              "cancel",
+              "shutdown"
+            ]
+          },
+          "jobId": {
+            "type": "string",
+            "description": "requeue、restart、cancel 时必填"
+          },
+          "gracePeriodMs": {
+            "type": "integer",
+            "description": "shutdown 时可选的优雅关闭等待时间"
+          }
+        }
+      },
+      "Workflow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "queued",
+              "running",
+              "paused",
+              "success",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowStep"
+            }
+          },
+          "executionTimeline": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowTimelineEvent"
+            }
+          },
+          "executionBatches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      },
+      "WorkflowStep": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "summary",
+              "todo",
+              "weather",
+              "judge"
+            ]
+          },
+          "input": {
+            "type": "string"
+          },
+          "dependsOn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "output": {
+            "nullable": true
+          },
+          "error": {
+            "type": "string"
+          },
+          "requiresConfirmation": {
+            "type": "boolean"
+          },
+          "confirmationMessage": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkflowTimelineEvent": {
+        "type": "object",
+        "properties": {
+          "ts": {
+            "type": "integer"
+          },
+          "stepId": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkflowState": {
+        "type": "object",
+        "required": [
+          "workflowId",
+          "version"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "workflowId": {
+            "type": "string"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/Workflow"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/Memory"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "waitingStepId": {
+            "type": "string"
+          },
+          "finalSummary": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": true
+      },
+      "WorkflowConfirmRequest": {
+        "type": "object",
+        "required": [
+          "workflowId",
+          "stepId",
+          "decision"
+        ],
+        "properties": {
+          "workflowId": {
+            "type": "string"
+          },
+          "stepId": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "confirm",
+              "cancel"
+            ]
+          },
+          "memory": {
+            "$ref": "#/components/schemas/Memory"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "local",
+              "mimo"
+            ]
+          },
+          "mimoModel": {
+            "type": "string"
+          },
+          "resumeContext": {
+            "type": "object",
+            "properties": {
+              "workflow": {
+                "$ref": "#/components/schemas/Workflow"
+              },
+              "memory": {
+                "$ref": "#/components/schemas/Memory"
+              },
+              "timeline": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WorkflowTimelineEvent"
+                }
+              },
+              "defaultStepRetries": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "ToolDescriptor": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  }
+}
