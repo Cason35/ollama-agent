@@ -1,0 +1,205 @@
+# 第74天：声明 Docker Compose 服务集合。
+services:
+  # 第74天：声明 Day74 Next.js 应用服务。
+  app:
+    # 第74天：从当前目录多阶段 Dockerfile 构建应用镜像。
+    build:
+      # 第74天：声明构建上下文为当前项目目录。
+      context: .
+      # 第74天：声明构建文件名称。
+      dockerfile: Dockerfile
+    # 第74天：声明应用容器名称方便教学操作。
+    container_name: ollama-chat-day74-app
+    # 第74天：加载本地环境变量文件，首次启动前由用户从模板复制。
+    env_file:
+      # 第74天：声明实际环境变量文件路径。
+      - .env
+    # 第74天：覆盖容器内基础设施连接地址和生产运行模式。
+    environment:
+      # 第74天：声明容器运行在 production 环境。
+      APP_ENV: production
+      # 第74天：声明容器内通过服务名访问 MySQL。
+      MYSQL_HOST: mysql
+      # 第74天：声明容器内通过服务名访问 Redis。
+      REDIS_URL: redis://redis:6379
+      # 第74天：声明容器内通过服务名访问 MinIO。
+      MINIO_ENDPOINT: minio
+      # 第74天：启用生产启动校验。
+      ENABLE_STARTUP_VALIDATION: "true"
+    # 第74天：映射宿主机 3000 端口到应用容器。
+    ports:
+      # 第74天：暴露 Next.js 页面和 API。
+      - "3000:3000"
+    # 第74天：等待基础设施健康后再启动应用。
+    depends_on:
+      # 第74天：要求 MySQL 已通过健康检查。
+      mysql:
+        # 第74天：声明依赖条件为服务健康。
+        condition: service_healthy
+      # 第74天：要求 Redis 已通过健康检查。
+      redis:
+        # 第74天：声明依赖条件为服务健康。
+        condition: service_healthy
+      # 第74天：要求 MinIO 已通过健康检查。
+      minio:
+        # 第74天：声明依赖条件为服务健康。
+        condition: service_healthy
+      # 第74天：要求数据库迁移任务成功完成。
+      migrate:
+        # 第74天：声明依赖条件为一次性任务成功退出。
+        condition: service_completed_successfully
+    # 第74天：允许容器通过固定主机名访问 Windows 或 macOS 上的 Ollama。
+    extra_hosts:
+      # 第74天：把 host.docker.internal 映射到宿主机网关。
+      - "host.docker.internal:host-gateway"
+    # 第74天：服务异常退出时自动重启。
+    restart: unless-stopped
+
+  # 第74天：声明一次性数据库迁移服务。
+  migrate:
+    # 第74天：复用 Dockerfile 构建阶段以保留迁移源码和 TypeScript 执行器。
+    build:
+      # 第74天：声明构建上下文为当前项目目录。
+      context: .
+      # 第74天：声明构建文件名称。
+      dockerfile: Dockerfile
+      # 第74天：停留在包含源码与开发依赖的 builder 阶段。
+      target: builder
+    # 第74天：声明迁移容器名称方便查看日志。
+    container_name: ollama-chat-day74-migrate
+    # 第74天：加载数据库凭证和版本配置。
+    env_file:
+      # 第74天：声明实际环境变量文件路径。
+      - .env
+    # 第74天：覆盖容器内数据库服务地址。
+    environment:
+      # 第74天：声明迁移按生产配置规则运行。
+      APP_ENV: production
+      # 第74天：声明容器内通过服务名访问 MySQL。
+      MYSQL_HOST: mysql
+    # 第74天：等待 MySQL 健康后执行迁移。
+    depends_on:
+      # 第74天：声明迁移依赖 MySQL。
+      mysql:
+        # 第74天：声明依赖条件为服务健康。
+        condition: service_healthy
+    # 第74天：执行全部尚未应用的数据库迁移。
+    command: ["npm", "run", "migration:up"]
+
+  # 第74天：声明 MySQL 生产化教学服务。
+  mysql:
+    # 第74天：使用 MySQL 8.4 长期支持镜像。
+    image: mysql:8.4
+    # 第74天：声明 MySQL 容器名称。
+    container_name: ollama-chat-day74-mysql
+    # 第74天：从同一环境变量文件读取数据库凭证。
+    env_file:
+      # 第74天：声明实际环境变量文件路径。
+      - .env
+    # 第74天：配置 MySQL 初始化参数。
+    environment:
+      # 第74天：设置 root 管理密码并复用教学密码。
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD}
+      # 第74天：创建平台数据库。
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      # 第74天：创建平台业务用户。
+      MYSQL_USER: ${MYSQL_USER}
+      # 第74天：设置平台业务用户密码。
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    # 第74天：持久化 MySQL 数据目录。
+    volumes:
+      # 第74天：把数据库文件保存到命名卷。
+      - mysql_data:/var/lib/mysql
+    # 第74天：为宿主机迁移与数据库教学工具暴露 MySQL 端口。
+    ports:
+      # 第74天：映射宿主机 3306 到容器 MySQL 端口。
+      - "3306:3306"
+    # 第74天：提供数据库健康检查。
+    healthcheck:
+      # 第74天：使用 mysqladmin 检查数据库连接状态。
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      # 第74天：每十秒检查一次。
+      interval: 10s
+      # 第74天：单次检查最多等待五秒。
+      timeout: 5s
+      # 第74天：连续失败十次才判定不健康。
+      retries: 10
+      # 第74天：给数据库初始化预留二十秒。
+      start_period: 20s
+    # 第74天：服务异常退出时自动重启。
+    restart: unless-stopped
+
+  # 第74天：声明 Redis 缓存、队列和锁服务。
+  redis:
+    # 第74天：使用 Redis 7 Alpine 轻量镜像。
+    image: redis:7-alpine
+    # 第74天：声明 Redis 容器名称。
+    container_name: ollama-chat-day74-redis
+    # 第74天：开启 AOF 持久化并定期生成 RDB 快照。
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    # 第74天：持久化 Redis 数据目录。
+    volumes:
+      # 第74天：把 Redis 数据保存到命名卷。
+      - redis_data:/data
+    # 第74天：提供 Redis 健康检查。
+    healthcheck:
+      # 第74天：通过 redis-cli PING 验证服务可用。
+      test: ["CMD", "redis-cli", "ping"]
+      # 第74天：每十秒检查一次。
+      interval: 10s
+      # 第74天：单次检查最多等待三秒。
+      timeout: 3s
+      # 第74天：连续失败十次才判定不健康。
+      retries: 10
+    # 第74天：服务异常退出时自动重启。
+    restart: unless-stopped
+
+  # 第74天：声明 MinIO 对象存储服务。
+  minio:
+    # 第74天：使用 MinIO 官方镜像。
+    image: minio/minio:latest
+    # 第74天：声明 MinIO 容器名称。
+    container_name: ollama-chat-day74-minio
+    # 第74天：从环境变量文件读取 MinIO 凭证。
+    env_file:
+      # 第74天：声明实际环境变量文件路径。
+      - .env
+    # 第74天：映射平台凭证到 MinIO 标准环境变量。
+    environment:
+      # 第74天：设置 MinIO 管理用户名。
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      # 第74天：设置 MinIO 管理密码。
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    # 第74天：启动 API 服务并把管理控制台放在 9001 端口。
+    command: server /data --console-address ":9001"
+    # 第74天：映射 MinIO API 与管理控制台端口。
+    ports:
+      # 第74天：暴露 MinIO S3 API。
+      - "9000:9000"
+      # 第74天：暴露 MinIO Web 控制台。
+      - "9001:9001"
+    # 第74天：持久化 MinIO 对象数据。
+    volumes:
+      # 第74天：把对象数据保存到命名卷。
+      - minio_data:/data
+    # 第74天：提供 MinIO 健康检查。
+    healthcheck:
+      # 第74天：通过官方健康端点验证服务存活。
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      # 第74天：每十秒检查一次。
+      interval: 10s
+      # 第74天：单次检查最多等待五秒。
+      timeout: 5s
+      # 第74天：连续失败十次才判定不健康。
+      retries: 10
+    # 第74天：服务异常退出时自动重启。
+    restart: unless-stopped
+
+# 第74天：声明三个基础设施持久化命名卷。
+volumes:
+  # 第74天：保存 MySQL 数据。
+  mysql_data:
+  # 第74天：保存 Redis AOF 和 RDB 数据。
+  redis_data:
+  # 第74天：保存 MinIO 对象数据。
+  minio_data:
