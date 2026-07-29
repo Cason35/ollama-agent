@@ -279,6 +279,61 @@ docker compose down
 
 不要执行 `docker compose down -v`，除非明确希望删除所有教学环境的持久化数据。
 
+#### 以后日常使用 Docker 启动
+
+首次构建和环境变量准备完成后，以后启动项目不需要重复执行 `npm install`，也通常不需要重新构建镜像。按以下步骤操作即可：
+
+1. 打开 Docker Desktop，等待界面显示 Docker Engine 已运行。
+2. 打开 PowerShell，进入 Day74 项目目录：
+
+```powershell
+cd D:\mine\code\ollama-agent\ollama-chat-day74
+```
+
+3. 在后台启动全部服务：
+
+```powershell
+docker compose up -d
+```
+
+4. 检查容器状态：
+
+```powershell
+docker compose ps -a
+```
+
+正常情况下，`app`、`mysql`、`redis` 和 `minio` 应显示 `healthy`；一次性的 `migrate` 容器显示 `Exited (0)` 属于正常状态。
+
+5. 打开浏览器访问：
+
+- Day74 应用：`http://localhost:3000`
+- Production Dashboard（生产仪表盘）：`http://localhost:3000/production`
+- MinIO Console（MinIO 管理控制台）：`http://localhost:9001`
+
+如果修改过源代码、依赖文件或 Dockerfile，需要重新构建镜像：
+
+```powershell
+docker compose up -d --build
+```
+
+常用排查和停止命令：
+
+```powershell
+# 查看应用实时日志
+docker compose logs -f app
+
+# 查看包括已退出容器在内的完整状态
+docker compose ps -a
+
+# 验证生产依赖健康状态
+Invoke-WebRequest http://localhost:3000/api/health
+
+# 停止环境并保留数据卷
+docker compose down
+```
+
+本机 MySQL 已占用 `3306`，因此本项目 Docker MySQL 对宿主机使用 `3307`，即 `localhost:3307`；Docker 容器内部仍通过 `mysql:3306` 通信。不要执行 `docker compose down -v`，除非明确需要删除 MySQL、Redis 和 MinIO 的持久化数据。
+
 ### 当前电脑环境检测结论
 
 - Node.js（JavaScript 服务端运行环境）：已安装，版本为 `v24.16.0`。
@@ -387,9 +442,336 @@ Day74 已经完成从“具备智能体平台业务能力”到“具备生产�
 代码层生产交付：已完成
 自动化验证：已通过
 Docker Compose 配置：已通过解析
-真实 Docker 容器启动：等待 Docker Engine 启动后执行
+真实 Docker 容器启动：已完成，应用、MySQL、Redis、MinIO 均通过健康检查
+数据库迁移：001 至 005 已成功执行
 真实备份、恢复、压力和故障演练：等待完整环境启动后执行
 Ollama 本地模型对话：等待安装或配置 Ollama 后执行
 ```
 
-这意味着 Day74 的开发任务已经完成，下一步重点不再是继续补代码，而是按照部署文档完成真实环境启动和生产演练。
+这意味着 Day74 的开发任务和真实 Docker（容器平台）环境启动已经完成。下一步重点不再是继续堆叠功能，而是完成生产演练，并将项目整理成别人能够理解、使用、维护和信任的工程作品。
+
+---
+
+## 十、Day74 阶段总结：Agent Platform Production Release Candidate（智能体平台生产发布候选版本）
+
+Day74 是整个 Agent Platform（智能体平台）工程体系中最后一个“工程落地阶段”。前 73 天主要解决“如何构建一个强大的 Agent System（智能体系统）”，Day74 则解决“如何让它真正运行、部署、维护和交付”。项目由一个能在开发电脑上运行的代码工程，升级成了可部署的平台产品。
+
+### 1. 环境工程化
+
+以前的目标是“我的电脑能运行”，现在的目标是“符合条件的服务器都能通过 Docker（容器平台）运行”。项目已经具备：
+
+- Docker（容器平台）：把应用及运行环境封装成一致的镜像。
+- Docker Compose（多容器编排）：统一启动应用、MySQL、Redis 和 MinIO。
+- Database Migration（数据库迁移）：用版本化脚本可靠地升级或回滚数据库结构。
+- Health Check（健康检查）：判断应用及基础设施是否存活、就绪和健康。
+- Startup Validation（启动校验）：应用接收流量前校验配置和关键依赖。
+- Fail Fast（快速失败）：生产依赖不满足时立即暴露错误，避免服务假启动。
+
+### 2. 自动交付能力
+
+项目已经形成标准的 CI Pipeline（持续集成流水线）：
+
+```text
+代码提交
+  ↓
+Lint（代码规范检查）
+  ↓
+Type Check（类型检查）
+  ↓
+Automated Test（自动化测试）
+  ↓
+Application Build（应用构建）
+  ↓
+Docker Build（容器镜像构建）
+  ↓
+生成可追踪的发布版本
+```
+
+这意味着交付不再依赖开发者手工重复操作，而是通过统一流水线验证代码质量、类型安全、回归结果和构建能力。
+
+### 3. 故障恢复能力
+
+系统运维思路已经从“服务挂了就重新启动”升级为完整的恢复闭环：
+
+```text
+Backup（备份）
+  ↓
+Health Check（健康检查）
+  ↓
+Failure Detection（故障发现）
+  ↓
+Restore / Recovery（恢复）
+  ↓
+再次验证服务健康状态
+```
+
+MySQL、Redis 和 MinIO 均具备备份与恢复方案，项目还提供 Load Test（压力测试）和 Redis Failure Recovery Test（Redis 故障恢复测试）脚本。
+
+### 4. 完整平台闭环
+
+当前系统已经形成从用户请求到生产交付的完整链路：
+
+```text
+User（用户）
+  ↓
+Tenant（租户）
+  ↓
+API Gateway（应用程序接口网关）
+  ↓
+Runtime Context（运行时上下文）
+  ↓
+Agent Runtime（智能体运行时）
+  ↓
+Workflow Runtime（工作流运行时）
+  ↓
+Memory（记忆系统）
+  ↓
+Knowledge / RAG（知识系统 / 检索增强生成）
+  ↓
+Model Routing（模型路由）
+  ↓
+Evaluation（效果评估）
+  ↓
+Observability（可观测性）
+  ↓
+Governance（平台治理）
+  ↓
+Deployment（部署交付）
+```
+
+### 5. 当前能力定位
+
+完成 Day74 后，能力定位已经不再只是“会调用 LLM API（大语言模型应用程序接口）的开发者”，而是更接近 Agent Platform Engineer（智能体平台工程师）。当前能力覆盖：
+
+| 能力 | 状态 |
+| --- | --- |
+| Agent Runtime（智能体运行时） | 已完成 |
+| Multi-Agent Collaboration（多智能体协作） | 已完成 |
+| Workflow Engine（工作流引擎） | 已完成 |
+| Durable Execution（持久化执行） | 已完成 |
+| RAG Platform（检索增强生成平台） | 已完成 |
+| Memory System（记忆系统） | 已完成 |
+| Prompt Platform（提示词平台） | 已完成 |
+| Model Routing（模型路由） | 已完成 |
+| Evaluation System（评估系统） | 已完成 |
+| Observability（可观测性） | 已完成 |
+| Security & Governance（安全与治理） | 已完成 |
+| Production Deployment（生产部署） | 已完成 |
+
+当前阶段进度：Agent Engineering（智能体工程）、Production Infrastructure（生产基础设施）和 Platform Engineering（平台工程）的主体建设均已完成。
+
+---
+
+## 十一、Day75 学习计划：Final Capstone V2（最终综合项目第二版）
+
+### 1. 学习主题与核心目标
+
+Day75 的主题是 Agent Platform Portfolio & Engineering Maturity（智能体平台作品集与工程成熟度）。核心目标是把 74 天构建的 Agent Platform（智能体平台）转化成一个可以展示、面试、开源和持续迭代的工程项目，并完成 Agent Platform v1.0 Release（智能体平台 1.0 正式发布）。
+
+此阶段不再以增加 Agent（智能体）、Tool（工具）或 Dashboard（仪表盘）数量为目标。功能覆盖已经较完整，继续堆功能的边际收益较低。Day75 更关注高级工程能力：设计系统、解释架构、说明取舍、展示价值和长期维护项目。
+
+最终应输出：
+
+- Source Code（源代码）。
+- Architecture（系统架构）。
+- Documentation（工程文档）。
+- Demo（演示案例）。
+- Benchmark（基准测试）。
+- Interview Material（面试讲解材料）。
+- Portfolio Package（项目作品集包）。
+
+### 2. 任务一：整理最终项目目录结构
+
+目标是让第一次阅读代码的人能在五分钟内理解项目用途和模块边界。建议形成清晰的目录：
+
+```text
+agent-platform/
+├── app/                    # 页面和 API（应用程序接口）
+├── lib/
+│   ├── agents/             # 智能体运行时
+│   ├── workflow/           # 工作流引擎
+│   ├── memory/             # 记忆系统
+│   ├── knowledge/          # 知识库与 RAG（检索增强生成）
+│   ├── prompts/            # 提示词管理
+│   ├── model/              # 模型注册与路由
+│   ├── evaluation/         # 评估系统
+│   ├── observability/      # 可观测性
+│   ├── governance/         # 多租户治理
+│   ├── storage/            # 存储抽象
+│   ├── queue/              # 任务队列
+│   └── security/           # 安全能力
+├── scripts/                # 运维和测试脚本
+├── tests/                  # 自动化测试
+├── docs/                   # 工程文档
+├── migrations/             # 数据库迁移
+├── docker-compose.yml      # 多容器编排
+├── README.md               # 项目入口文档
+└── CHANGELOG.md            # 版本变更记录
+```
+
+### 3. 任务二：编写完整 README（项目说明文档）
+
+README（项目说明文档）是项目的第一印象，应至少包含：
+
+- 项目介绍和目标用户。
+- 核心能力列表。
+- Overall Architecture（整体架构）图。
+- Quick Start（快速启动）步骤。
+- 配置、测试、演示和常见问题入口。
+
+核心能力应明确展示 Agent Runtime（智能体运行时）、Multi-Agent（多智能体）、DAG Workflow（有向无环图工作流）、Durable Execution（持久化执行）、RAG（检索增强生成）、Long-Term Memory（长期记忆）、Prompt Management（提示词管理）、Evaluation（评估）、Observability（可观测性）和 Multi-Tenant Security（多租户安全）。
+
+### 4. 任务三：整理 ADR（架构决策记录）
+
+新增 `docs/adr/`，至少整理十份 Architecture Decision Record（架构决策记录）。每份记录包含：
+
+- Problem（问题）：当时需要解决什么问题。
+- Decision（决策）：最终选择了什么方案。
+- Alternatives（备选方案）：还考虑过哪些方案。
+- Trade-off（权衡）：方案增加了什么收益和成本。
+- Consequence（结果）：该决策对后续架构产生什么影响。
+
+建议主题包括：为何选择 Workflow DAG（有向无环图工作流）、为何使用 MySQL + Vector Store（关系型数据库与向量存储）、为何使用 Redis Queue（Redis 任务队列）、为何引入 Runtime Context（运行时上下文），以及为何需要 Durable Execution（持久化执行）、Rerank（重排序）、Multi-Tenant Isolation（多租户隔离）和 Feature Flag（功能开关）。
+
+### 5. 任务四：制作系统架构图
+
+至少输出五张图：
+
+1. Overall Architecture（整体架构）：展示平台模块及外部依赖。
+2. Agent Runtime Flow（智能体运行流程）：展示 Request（请求）→ Planner（规划器）→ Agent（智能体）→ Tool（工具）→ Model（模型）→ Result（结果）。
+3. Workflow Execution（工作流执行）：展示 DAG（有向无环图）、Checkpoint（检查点）、Event（事件）和 Resume（恢复执行）。
+4. RAG Pipeline（检索增强生成流水线）：展示 Document（文档）→ Chunk（切片）→ Embedding（向量化）→ Vector Store（向量存储）→ Retriever（检索器）→ Citation（引用）。
+5. Production Infrastructure（生产基础设施）：展示 Docker（容器平台）、Redis、MySQL、MinIO、CI/CD（持续集成与持续交付）和 Monitoring（监控）。
+
+### 6. 任务五：制作 Demo Story（演示故事）
+
+演示不应只是逐个点击功能，而应设计一条完整业务故事。例如 Research Agent Platform（研究智能体平台）：
+
+1. 用户提出“分析高海拔环境对鸡肉品质的影响，并生成研究报告”。
+2. Supervisor（监督智能体）创建执行计划。
+3. Research Agent（研究智能体）检索知识库。
+4. Memory（记忆系统）读取用户的研究偏好。
+5. Workflow（工作流）依次完成搜索、分析、总结和写作。
+6. Evaluation（评估系统）对结果评分。
+7. Observability（可观测性系统）展示 Trace（请求追踪）。
+8. 系统生成带引用的最终研究报告。
+
+### 7. 任务六：准备 Benchmark（基准测试）
+
+建立 `benchmark/`，用数据而不是主观描述证明系统能力：
+
+| 领域 | 建议指标 |
+| --- | --- |
+| Agent（智能体） | Success Rate（成功率）、Task Completion Rate（任务完成率） |
+| Workflow（工作流） | Average Duration（平均耗时）、Failure Recovery Rate（故障恢复率） |
+| RAG（检索增强生成） | Recall@K（前 K 项召回率）、Citation Accuracy（引用准确率） |
+| Model（模型） | Latency（延迟）、Cost（成本）、Quality（质量） |
+| System（系统） | Concurrent Users（并发用户数）、Throughput（吞吐量）、Error Rate（错误率） |
+
+测试必须记录测试环境、数据规模、模型版本、参数、执行次数和结果，确保结果可复现。
+
+### 8. 任务七：准备 Interview Explanation（面试讲解）
+
+整理至少 30 个面试问题与答案，例如：
+
+- 为什么 Agent（智能体）需要 Workflow（工作流）？
+- 为什么需要 Memory（记忆系统）？
+- RAG（检索增强生成）为什么需要 Rerank（重排序）？
+- 为什么 Workflow（工作流）要支持 Durable Execution（持久化执行）？
+- 为什么需要 Evaluation（评估系统）？
+- 如何保证 Multi-Tenant Isolation（多租户隔离）？
+
+回答应覆盖问题背景、设计方案、备选方案、工程权衡和项目中的实际实现，避免只背定义。
+
+### 9. 任务八：整理项目技术亮点
+
+把项目能力整理成可用于 README（项目说明文档）、简历和面试的 Highlights（技术亮点）：
+
+- 自研 Agent Runtime（智能体运行时）：支持 Planner（规划器）、Tool Calling（工具调用）、Memory（记忆）和 Reflection（反思）。
+- Durable Workflow Engine（持久化工作流引擎）：支持 DAG（有向无环图）、Checkpoint（检查点）、Replay（回放）和 Resume（恢复执行）。
+- Production RAG Platform（生产级检索增强生成平台）：支持 Hybrid Search（混合检索）、Rerank（重排序）、Citation（引用）和 Index Version（索引版本）。
+- Enterprise Governance（企业级治理）：支持 Tenant（租户）、RBAC（基于角色的访问控制）、Audit（审计）和 Quota（配额）。
+
+### 10. 任务九：最终安全检查
+
+发布前完成以下检查：
+
+- Secrets（敏感密钥）：确认 API Key（接口密钥）、Password（密码）和 Token（令牌）没有提交到 Git（版本控制系统）。
+- Database（数据库）：确认 Migration（迁移）完整、可重复执行，并具备回滚或恢复方案。
+- Logs（日志）：确认不会打印密钥、密码、令牌和完整个人敏感数据。
+- Permission（权限）：验证 Tenant A / B（租户 A / B）之间的数据和权限隔离。
+- Dependency Audit（依赖审计）：检查已知漏洞并评估升级风险。
+
+### 11. 任务十：发布 Release v1.0（1.0 正式版本）
+
+创建 `v1.0.0` 版本，并在 `CHANGELOG.md`（版本变更记录）中说明主要能力：Agent Runtime（智能体运行时）、Workflow Engine（工作流引擎）、RAG Platform（检索增强生成平台）、Memory System（记忆系统）、Evaluation Platform（评估平台）、Observability（可观测性）、Governance（治理）和 Deployment（部署交付）。
+
+发布包应同时包含源代码、架构文档、演示流程、基准测试结果、面试问答和安全检查记录。
+
+### 12. Day75 验收标准
+
+1. 是否完成项目目录整理。
+2. 是否完成 README（项目说明文档）。
+3. 是否完成 Architecture Documentation（架构文档）。
+4. 是否完成 ADR（架构决策记录）。
+5. 是否完成系统架构图。
+6. 是否完成 Demo Story（演示故事）。
+7. 是否完成 Benchmark（基准测试）。
+8. 是否完成 Interview Q&A（面试问答）。
+9. 是否整理项目 Highlights（技术亮点）。
+10. 是否完成安全检查。
+11. 是否发布 `v1.0.0` Release（正式版本）。
+12. 是否完成最终 Portfolio Package（项目作品集包）。
+
+### 13. Day75 打卡模板
+
+```text
+【第75天打卡】
+
+1. 是否完成项目目录整理：是 / 否
+2. 是否完成 README（项目说明文档）：是 / 否
+3. 是否完成 Architecture Documentation（架构文档）：是 / 否
+4. 是否完成 ADR（架构决策记录）：是 / 否
+5. 是否完成系统架构图：是 / 否
+6. 是否完成 Demo Story（演示故事）：是 / 否
+7. 是否完成 Benchmark（基准测试）：是 / 否
+8. 是否完成 Interview Q&A（面试问答）：是 / 否
+9. 是否整理项目 Highlights（技术亮点）：是 / 否
+10. 是否完成安全检查：是 / 否
+11. 是否发布 v1.0.0 Release（正式版本）：是 / 否
+12. 是否完成 Portfolio Package（项目作品集包）：是 / 否
+13. 最大收获：
+14. 当前系统能力：
+```
+
+### 14. Day75 核心认知
+
+工程师的最终能力，不只是把系统做出来，而是能够让别人理解、使用、维护和信任这个系统。
+
+完成 Day75 后，75 天学习路线将形成正式闭环：
+
+```text
+Local LLM Chat（本地大语言模型聊天）
+  ↓
+Agent Runtime（智能体运行时）
+  ↓
+Workflow（工作流）
+  ↓
+RAG（检索增强生成）
+  ↓
+Memory（记忆系统）
+  ↓
+Multi-Agent（多智能体协作）
+  ↓
+Evaluation（评估）
+  ↓
+Observability（可观测性）
+  ↓
+Security（安全）
+  ↓
+Production（生产交付）
+  ↓
+Portfolio（工程作品集）
+```
+
+最终产物是 Agent Platform v1.0（智能体平台 1.0 正式版）。这套项目可以用于展示系统设计、架构设计、工程实践和生产交付能力，也可以作为后续求职面试与持续迭代的核心工程作品。

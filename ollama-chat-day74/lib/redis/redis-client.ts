@@ -8,6 +8,7 @@ type RedisClientOptions = { /* 第58天：定义 RedisClient（Redis 客户端�
 }; /* 第58天：结束 RedisClient 配置类型定义。 */
 export class RedisClient { /* 第58天：定义统一 RedisClient（Redis 客户端封装），业务代码不直接调用 ioredis。 */
   private connection: Redis | null = null; /* 第58天：保存懒加载 ioredis 连接实例。 */
+  private connectPromise: Promise<void> | null = null; /* 复用正在建立的连接，避免并发健康检查过早发送命令。 */
   private readonly url: string; /* 第58天：保存最终 Redis 连接地址。 */
   private readonly keyPrefix: string; /* 第59天：保存统一 Key Prefix（键前缀），隔离 Redis Cache 与 Redis Queue 数据。 */
   private readonly operationTimeoutMs: number; /* 第58天：保存 Redis 操作超时时间。 */
@@ -135,7 +136,10 @@ export class RedisClient { /* 第58天：定义统一 RedisClient（Redis 客户
   } /* 第58天：结束统一操作包装器。 */
   private async getConnection(): Promise<Redis> { /* 第58天：定义懒加载 Redis 连接的方法。 */
     if (!this.connection || this.connection.status === "end") this.connection = this.createConnection(); /* 第58天：连接不存在或已结束时重新创建。 */
-    if (this.connection.status === "wait") await this.withTimeout(this.connection.connect()); /* 第58天：懒连接状态下显式连接 Redis。 */
+    if (this.connection.status === "wait" && !this.connectPromise) { /* 首个调用负责连接，其余并发调用复用同一 Promise。 */
+      this.connectPromise = this.withTimeout(this.connection.connect()).finally(() => { this.connectPromise = null; });
+    }
+    if (this.connectPromise) await this.connectPromise; /* Redis ready 后才允许并发调用发送命令。 */
     return this.connection; /* 第58天：返回可用或正在被 ioredis 管理的连接。 */
   } /* 第58天：结束懒加载连接方法。 */
   private createConnection(): Redis { /* 第58天：定义创建 ioredis 连接实例的方法。 */

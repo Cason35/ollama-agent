@@ -4,10 +4,15 @@ loadEnvConfig(process.cwd()); // 第74天：在加载数据库模块前读取项
 
 async function main(): Promise<void> { // 第74天：定义数据库迁移命令行入口。
   const { MigrationManager } = await import("@/lib/production/migration-manager"); // 第74天：环境变量就绪后再加载 MySQL 迁移管理器。
+  const { pool } = await import("@/lib/db/mysql"); // 命令结束前显式关闭连接池，避免一次性迁移容器持续运行。
   const manager = new MigrationManager(); // 第74天：创建当前项目迁移管理器。
   const action = process.argv[2] ?? "status"; // 第74天：读取 up、rollback 或 status 动作。
-  const result = action === "up" ? await manager.up() : action === "rollback" ? await manager.rollback() : await manager.status(); // 第74天：执行对应迁移动作。
-  console.table(result); // 第74天：以表格形式输出全部数据库版本状态。
+  try {
+    const result = action === "up" ? await manager.up() : action === "rollback" ? await manager.rollback() : await manager.status(); // 第74天：执行对应迁移动作。
+    console.table(result); // 第74天：以表格形式输出全部数据库版本状态。
+  } finally {
+    await pool.end(); // 释放 MySQL 套接字，让 Compose 的 service_completed_successfully 条件可以生效。
+  }
 } // 第74天：结束数据库迁移命令行入口。
 
 void main().catch((error) => { // 第74天：捕获迁移失败并返回非零退出码。
