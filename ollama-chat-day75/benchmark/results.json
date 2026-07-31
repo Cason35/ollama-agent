@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "release": "v1.0.0",
+  "generatedAt": "2026-07-29T00:00:00+08:00",
+  "environment": {
+    "scope": "code-level-acceptance",
+    "next": "16.2.12",
+    "react": "19.2.4",
+    "model": null
+  },
+  "results": [
+    {
+      "domain": "portfolio",
+      "status": "verified",
+      "runs": 1,
+      "metrics": {
+        "requiredDeliverables": 12,
+        "adrCount": 10,
+        "architectureDiagramCount": 5,
+        "minimumInterviewQuestionCount": 30
+      }
+    },
+    {
+      "domain": "agent-workflow-rag-model-system",
+      "status": "planned",
+      "runs": 0,
+      "metrics": null,
+      "reason": "Requires Docker infrastructure, a pinned Ollama model, benchmark datasets, and three measured runs."
+    }
+  ]
+}

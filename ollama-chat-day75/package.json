@@ -1,0 +1,53 @@
+{
+  "name": "ollama-chat-day75",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test:day64": "tsx scripts/test-day64-unified-runtime-context.ts",
+    "test:day65": "tsx scripts/test-day65-unified-event-system.ts",
+    "test:day66": "tsx scripts/test-day66-unified-registry.ts",
+    "test:day67": "tsx scripts/test-day67-production-prompt-platform.ts",
+    "test:day68": "tsx scripts/test-day68-production-memory-platform.ts",
+    "test:day69": "tsx scripts/test-day69-production-knowledge-platform.ts",
+    "test:day70": "tsx scripts/test-day70-durable-workflow-platform.ts",
+    "test:day71": "tsx scripts/test-day71-production-evaluation-platform.ts",
+    "test:day72": "tsx scripts/test-day72-production-observability-platform.ts",
+    "test:day73": "tsx scripts/test-day73-agent-platform-governance.ts",
+    "test:day74": "tsx scripts/test-day74-production-release.ts",
+    "test:day75": "tsx scripts/test-day75-portfolio.ts",
+    "test:all": "npm run test:day64 && npm run test:day65 && npm run test:day66 && npm run test:day67 && npm run test:day68 && npm run test:day69 && npm run test:day70 && npm run test:day71 && npm run test:day72 && npm run test:day73 && npm run test:day74 && npm run test:day75",
+    "migration:up": "tsx scripts/migrate.ts up",
+    "migration:rollback": "tsx scripts/migrate.ts rollback",
+    "migration:status": "tsx scripts/migrate.ts status",
+    "backup": "tsx scripts/backup.ts",
+    "restore": "tsx scripts/restore.ts",
+    "load:test": "tsx scripts/load-test-day74.ts",
+    "failure:test": "tsx scripts/failure-test-day74.ts",
+    "validate:startup": "tsx scripts/validate-startup.ts"
+  },
+  "dependencies": {
+    "@next/env": "16.2.4",
+    "ioredis": "^5.11.1",
+    "minio": "^8.0.7",
+    "mysql2": "^3.14.1",
+    "next": "16.2.12",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.12",
+    "tailwindcss": "^4",
+    "tsx": "^4.22.4",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,27 @@
+export const GOVERNANCE_PERMISSIONS = ["agent.execute", "workflow.run", "workflow.create", "workflow.delete", "knowledge.read", "knowledge.create", "knowledge.delete", "prompt.read", "prompt.publish", "evaluation.read", "evaluation.run", "governance.read"] as const; // 第73天：集中声明多租户平台全部标准权限名称。
+export type GovernancePermission = (typeof GOVERNANCE_PERMISSIONS)[number]; // 第73天：从权限常量推导权限联合类型避免自由字符串漂移。
+export type TenantPlan = "free" | "pro" | "enterprise"; // 第73天：定义免费版、专业版和企业版租户计划。
+export type UserIdentity = { id: string; email?: string; name?: string; status: "active" | "disabled"; createdAt: number }; // 第73天：定义统一用户身份、资料、状态和创建时间。
+export type Tenant = { id: string; name: string; plan: TenantPlan; status: "active" | "suspended"; createdAt: number }; // 第73天：定义组织或租户及其套餐和运行状态。
+export type Role = { id: string; name: "Admin" | "Developer" | "User" | "Viewer"; permissions: (GovernancePermission | "*")[]; description: string }; // 第73天：定义默认角色及其标准权限集合。
+export type TenantMembership = { id: string; userId: string; tenantId: string; roleIds: string[]; createdAt: number }; // 第73天：定义用户在指定租户内的角色映射。
+export type IdentityContext = { userId: string; tenantId: string; membershipId: string; roles: string[]; permissions: string[] }; // 第73天：定义运行时上下文中的用户、租户、角色和权限身份信息。
+export type SecurityContext = IdentityContext & { authenticatedAt: number; authProvider: string }; // 第73天：定义完成认证后的安全上下文和认证提供者信息。
+export type AuthenticatedIdentity = { user: UserIdentity; tenant: Tenant; membership: TenantMembership }; // 第73天：定义身份认证成功后返回的完整用户租户关系。
+export type OwnerContext = { tenantId: string; createdBy: string }; // 第73天：定义所有核心资源必须携带的租户与创建者归属信息。
+export type GovernedResourceType = "agent" | "agent_definition" | "workflow" | "workflow_definition" | "prompt" | "production_prompt" | "knowledge" | "knowledge_base" | "memory" | "evaluation" | "evaluation_dataset" | "trace"; // 第73天：定义需要资源归属和租户隔离的核心平台资源类型。
+export type GovernedResource = { id: string; type: GovernedResourceType; name: string; ownerContext: OwnerContext; size: number; metadata: Record<string, unknown>; createdAt: number; updatedAt: number }; // 第73天：定义携带所有者上下文、容量和安全元数据的治理资源。
+export type TenantQuota = { dailyTokens: number; monthlyCost: number; maxWorkflow: number; maxKnowledgeSize: number }; // 第73天：定义租户令牌、成本、工作流和知识容量配额。
+export type TenantUsage = { dailyTokens: number; monthlyCost: number; workflowCount: number; knowledgeSize: number }; // 第73天：定义租户当前四项用量累计值。
+export type QuotaDimension = "dailyTokens" | "monthlyCost" | "maxWorkflow" | "maxKnowledgeSize"; // 第73天：定义配额检查器可报告的限制维度。
+export type RequestedUsage = Partial<TenantUsage>; // 第73天：定义一次网关请求预计新增的租户用量。
+export type QuotaDecision = { allowed: boolean; dimension: QuotaDimension; current: number; requested: number; limit: number; remaining: number; reason: string }; // 第73天：定义单项配额检查的允许或拒绝结果。
+export type PermissionDecision = { allowed: boolean; permission: GovernancePermission; roles: Role[]; permissions: string[]; reason: string }; // 第73天：定义权限服务可解释的角色权限判定结果。
+export type AuditResult = "success" | "failed" | "permission_denied"; // 第73天：定义审计动作成功、失败和权限拒绝三类结果。
+export type AuditLog = { id: string; userId: string; tenantId: string; action: string; resourceType: string; resourceId: string; result: AuditResult; reason?: string; requestId: string; traceId: string; timestamp: number; previousHash: string; integrityHash: string; metadata: Record<string, unknown> }; // 第73天：定义包含身份、资源、结果、链路和防篡改哈希的审计日志。
+export type GovernanceAction = GovernancePermission; // 第73天：复用标准权限名称作为生产网关动作名称。
+export type GatewayRequest = { token: string; action: GovernanceAction; tenantId?: string; requestId?: string; traceId?: string; resourceType?: GovernedResourceType | "platform"; resourceId?: string; estimatedUsage?: RequestedUsage; payload?: Record<string, unknown> }; // 第73天：定义生产接口网关统一接收的认证、授权、资源和用量请求。
+export type GatewayResult<T = unknown> = { ok: boolean; status: number; code: "OK" | "AUTHENTICATION_FAILED" | "TENANT_MISMATCH" | "PERMISSION_DENIED" | "RATE_LIMITED" | "QUOTA_EXCEEDED" | "RESOURCE_NOT_FOUND" | "ACTION_FAILED"; message: string; context?: import("@/lib/runtime/unified-runtime-context").RuntimeContextV2; data?: T; audit?: AuditLog; quotaDecisions?: QuotaDecision[] }; // 第73天：定义网关对成功和各类生产安全拒绝的统一响应。
+export type GovernanceOverview = { tenants: number; activeUsers: number; resources: number; permissionDenials: number; quotaExceeded: number; auditLogs: number; productionReady: boolean }; // 第73天：定义治理仪表盘首页核心指标。
+export type SecurityTestEvidence = { id: string; name: string; passed: boolean; evidence: string }; // 第73天：定义六类生产安全测试的可视化证据。
+export type GovernanceSnapshot = { overview: GovernanceOverview; tenants: Tenant[]; users: UserIdentity[]; memberships: TenantMembership[]; roles: Role[]; resources: GovernedResource[]; quotas: { tenant: Tenant; quota: TenantQuota; usage: TenantUsage; exceeded: boolean }[]; auditLogs: AuditLog[]; events: import("@/lib/events/event-types").RuntimeEventRecord[]; runtimeContexts: import("@/lib/runtime/unified-runtime-context").RuntimeContextV2[]; registryItems: import("@/lib/registry/registry-types").RegistryItem[]; traces: import("@/lib/observability/types").DistributedTraceV2[]; securityTests: SecurityTestEvidence[]; generatedAt: number }; // 第73天：定义租户、权限、配额、审计和平台接入证据的完整治理快照。
